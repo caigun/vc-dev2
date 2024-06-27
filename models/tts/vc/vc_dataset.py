@@ -65,7 +65,7 @@ class VCDataset(Dataset):
 
         # Load metadata cache
         # metadata_cache: {file_path: num_frames}
-        self.metadata_cache_path = '/mnt/data2/hehaorui/ckpt/rp_metadata_cache.json'
+        self.metadata_cache_path = '/nfsmnt/wangcaijun/ckpt/rp_metadata_cache.json'
         print(f"Loading metadata_cache from {self.metadata_cache_path}")
         if os.path.exists(self.metadata_cache_path):
             with open(self.metadata_cache_path, 'r', encoding='utf-8') as f:
@@ -77,7 +77,7 @@ class VCDataset(Dataset):
 
         # Load speaker cache
         # speaker_cache: {file_path: speaker}
-        self.speaker_cache_path = '/mnt/data2/hehaorui/ckpt/rp_file2speaker.json'
+        self.speaker_cache_path = '/nfsmnt/wangcaijun/ckpt/rp_file2speaker.json'
         print(f"Loading speaker_cache from {self.speaker_cache_path}")
         if os.path.exists(self.speaker_cache_path):
             with open(self.speaker_cache_path, 'r', encoding='utf-8') as f:
@@ -191,7 +191,7 @@ class VCDataset(Dataset):
         index2speaker = {}
         for file in self.files:
             num_frames = metadata_cache[file]
-            if SAMPLE_RATE * 3 <= num_frames <= SAMPLE_RATE * 30:
+            if SAMPLE_RATE * 3 <= num_frames <= SAMPLE_RATE * 15:
                 filtered_files.append(file)
                 all_num_frames.append(num_frames)
                 index2speaker[len(filtered_files) - 1] = speaker_cache[file]
