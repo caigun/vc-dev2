@@ -88,6 +88,7 @@ class VCDataset(Dataset):
             self.speaker_cache = {}
         
         self.files = []
+        self.wfiles = []
         # Load all flac files
         for directory in directory_list:
             print(f"Loading {directory}")
@@ -160,12 +161,15 @@ class VCDataset(Dataset):
 
     def get_flac_files(self, directory):
         flac_files = []
+        flac_wfiles = []
         for root, dirs, files in os.walk(directory):
             for file in files:
                 # flac or wav
-                if file.endswith(".flac") or file.endswith(".wav"):
+                if file.endswith("_output.flac") or file.endswith("_output.wav"):
+                    flac_wfiles.append(os.path.join(root, file))
+                elif file.endswith(".flac") or file.endswith(".wav"):
                     flac_files.append(os.path.join(root, file))
-        return flac_files
+        return flac_files, flac_wfiles
 
     def get_all_flac(self, directory):
         directories = [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]

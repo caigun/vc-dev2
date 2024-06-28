@@ -1,11 +1,11 @@
-#!/usr/bin/env bash
-#SBATCH --job-name=train-valle-ar            # Job name
+#!/bin/bash
+#SBATCH -J vc
+#SBATCH -p p-RTX2080
+#SBATCH -N 1
+#SBATCH -c 1
+#SBATCH -A T00120230002
+#SBATCH --gres=gpu:1
 #SBATCH --output result.out         ## filename of the output
-#SBATCH --nodes=1                   ## Run all processes on a single node
-#SBATCH -w, --nodelist=node03             ## Request the pointed node 	
-#SBATCH --ntasks=8                  ## number of processes = 20
-#SBATCH --cpus-per-task=1           ## Number of CPU cores allocated to each process
-#SBATCH --partition=Project         ## Partition name: Project or Debug (Debug is default)
 
 # Copyright (c) 2023 Amphion.
 #
@@ -14,7 +14,7 @@
 
 
 ######## Build Experiment Environment ###########
-base_dir="/nfsmnt/wangcaijun/vc-dev2"
+base_dir="/mntnfs/lee_data1/caijunwang/vc-dev2"
 cd $base_dir
 pwd
 # exp_dir=$(cd `dirname $0`; pwd)
@@ -39,7 +39,7 @@ if [ -z "$exp_config" ]; then
 fi
 echo "Exprimental Configuration File: $exp_config"
 
-exp_name="new_mhubert_g4"
+exp_name="new_mhubert"
 
 if [ -z "$gpu" ]; then
     gpu="0,1,2,3"
