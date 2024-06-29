@@ -88,16 +88,14 @@ class VCDataset(Dataset):
             self.speaker_cache = {}
         
         self.files = []
-        self.wfiles = []
         # Load all flac files
         for directory in directory_list:
             print(f"Loading {directory}")
             files = self.get_flac_files(directory)
             random.shuffle(files)
-            print(f"Loaded {len(files)} files")
             self.files.extend(files)
             del files
-            print(f"Now {len(self.files)} files")
+            print(f"Now {len(files)} files.")
             self.meta_data_cache = self.process_files()
             self.speaker_cache = self.process_speakers()
             temp_cache_path = self.metadata_cache_path.replace('.json', f'_{directory.split("/")[-1]}.json')
@@ -113,7 +111,7 @@ class VCDataset(Dataset):
         random.shuffle(self.files)  # Shuffle the files.
 
         self.filtered_files, self.all_num_frames, index2numframes, index2speakerid = self.filter_files()
-        #只有3-30s的语音才会被保留
+        #只有3-15s的语音才会被保留
         print(f"Loaded {len(self.filtered_files)} files")
 
         self.index2numframes = index2numframes#index to 每条utt的长度
@@ -127,15 +125,16 @@ class VCDataset(Dataset):
         )
         del self.meta_data_cache, self.speaker_cache
 
-        if self.use_ref_noise or self.use_source_noise:
-            if TRAIN_MODE:
-                self.noise_filenames = self.get_all_flac(args.noise_dir)
-            else:
-                self.noise_filenames = self.get_all_flac(args.test_noise_dir)
+        # if self.use_ref_noise or self.use_source_noise:
+        #     if TRAIN_MODE:
+        #         self.noise_filenames = self.get_all_flac(args.noise_dir)
+        #     else:
+        #         self.noise_filenames = self.get_all_flac(args.test_noise_dir)
 
     def process_files(self):
         print(f"Processing metadata...")
-        files_to_process = [file for file in self.files if file not in self.metadata_cache]
+        files_to_process = [file for (file, wfile) in self.files if file not in self.metadata_cache]+\
+                            [wfile for (file, wfile) in self.files if wfile not in self.metadata_cache]
         if files_to_process:
             with Pool(processes=NUM_WORKERS) as pool:
                 results = list(tqdm(pool.imap_unordered(get_metadata, files_to_process), total=len(files_to_process)))
@@ -148,7 +147,7 @@ class VCDataset(Dataset):
 
     def process_speakers(self):
         print(f"Processing speakers...")
-        files_to_process = [file for file in self.files if file not in self.speaker_cache]
+        files_to_process = [file for (file, wfile) in self.files if file not in self.speaker_cache]
         if files_to_process:
             with Pool(processes=NUM_WORKERS) as pool:
                 results = list(tqdm(pool.imap_unordered(get_speaker, files_to_process), total=len(files_to_process)))
@@ -161,15 +160,13 @@ class VCDataset(Dataset):
 
     def get_flac_files(self, directory):
         flac_files = []
-        flac_wfiles = []
         for root, dirs, files in os.walk(directory):
             for file in files:
-                # flac or wav
                 if file.endswith("_output.flac") or file.endswith("_output.wav"):
-                    flac_wfiles.append(os.path.join(root, file))
-                elif file.endswith(".flac") or file.endswith(".wav"):
-                    flac_files.append(os.path.join(root, file))
-        return flac_files, flac_wfiles
+                    # Remove the "_output" part and keep the extension
+                    new_file = file.replace("_output", "")
+                    flac_files.append((os.path.join(root, new_file), os.path.join(root, file)))
+        return flac_files
 
     def get_all_flac(self, directory):
         directories = [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
@@ -193,10 +190,10 @@ class VCDataset(Dataset):
         all_num_frames = []
         index2numframes = {}
         index2speaker = {}
-        for file in self.files:
+        for file, wfile in self.files:
             num_frames = metadata_cache[file]
             if SAMPLE_RATE * 3 <= num_frames <= SAMPLE_RATE * 15:
-                filtered_files.append(file)
+                filtered_files.append((file, wfile))
                 all_num_frames.append(num_frames)
                 index2speaker[len(filtered_files) - 1] = speaker_cache[file]
                 index2numframes[len(filtered_files) - 1] = num_frames
@@ -283,20 +280,24 @@ class VCDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
-        file_path = self.filtered_files[idx]
+        file_path, wfile_path = self.filtered_files[idx]
         speech, _ = librosa.load(file_path, sr=SAMPLE_RATE)
+        wspeech, _ = librosa.load(wfile_path, sr=SAMPLE_RATE)
         if len(speech) > 30 * SAMPLE_RATE:
             speech = speech[:30 * SAMPLE_RATE]
+            # wspeech = wspeech[:30 * SAMPLE_RATE]
         speech = torch.tensor(speech, dtype=torch.float32)
-        inputs = self._get_reference_vc(speech, hop_length=200)
+        # inputs = torch.tensor(wspeech, dtype=torch.float32)
+        inputs = self._get_reference_vc(speech, wspeech hop_length=200)
         speaker = self.index2speaker[idx]
         speaker_id = self.speaker2id[speaker]
         inputs["speaker_id"] = speaker_id
         return inputs
     
-    def _get_reference_vc(self, speech, hop_length):
+    def _get_reference_vc(self, speech, wspeech, hop_length):
         pad_size = 1600 - speech.shape[0] % 1600
         speech = torch.nn.functional.pad(speech, (0, pad_size)) # 保证语音长度是1600的倍数
+        wspeech = torch.nn.functional.pad(wspeech, (0, pad_size))
 
         #hop_size
         frame_nums = speech.shape[0] // hop_length
@@ -305,27 +306,26 @@ class VCDataset(Dataset):
         start_frames, end_frames = 0, clip_frame_nums
 
         ref_speech = speech[start_frames * hop_length : end_frames * hop_length]
-        new_speech = torch.cat((speech[:start_frames * hop_length], speech[end_frames * hop_length:]), 0)
+        new_speech = torch.cat((wspeech[:start_frames * hop_length], wspeech[end_frames * hop_length:]), 0)
 
         ref_mask = torch.ones(len(ref_speech) // hop_length)
         mask = torch.ones(len(new_speech) // hop_length)
 
-        if not (self.use_source_noise or self.use_ref_noise):
-            # 不使用噪声
-            return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask}
-        elif self.use_source_noise and self.use_ref_noise:
-            # 使用噪声
-            noisy_ref_speech = self.add_noise(ref_speech) # 添加噪声
-            nosiy_speech = self.add_noise(new_speech) # 添加噪声
-            return {"speech": new_speech, "noisy_speech":nosiy_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask}
-        elif self.use_source_noise and not self.use_ref_noise:
-            # 只使用源噪声
-            noisy_speech = self.add_noise(new_speech)
-            return {"speech": new_speech, "noisy_speech": noisy_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask}
-        elif self.use_ref_noise and not self.use_source_noise:
-            # 只使用参考噪声
-            noisy_ref_speech = self.add_noise(ref_speech)
-            return {"speech": new_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask}
+        return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask}
+    
+        # elif self.use_source_noise and self.use_ref_noise:
+        #     # 使用噪声
+        #     noisy_ref_speech = self.add_noise(ref_speech) # 添加噪声
+        #     nosiy_speech = self.add_noise(new_speech) # 添加噪声
+        #     return {"speech": new_speech, "noisy_speech":nosiy_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask}
+        # elif self.use_source_noise and not self.use_ref_noise:
+        #     # 只使用源噪声
+        #     noisy_speech = self.add_noise(new_speech)
+        #     return {"speech": new_speech, "noisy_speech": noisy_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask}
+        # elif self.use_ref_noise and not self.use_source_noise:
+        #     # 只使用参考噪声
+        #     noisy_ref_speech = self.add_noise(ref_speech)
+        #     return {"speech": new_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask}
         
 class VCCollator(BaseCollator):
     def __init__(self, cfg):

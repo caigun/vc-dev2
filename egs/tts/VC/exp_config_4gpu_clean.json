@@ -39,7 +39,7 @@
   "trans_exp": {
     "directory_list":[
     //   "/mnt/data4/hehaorui/medium_15s",
-      "/mntnfs/lee_data1/caijunwang/resources/small-15s"
+      "/mntnfs/lee_data1/VCdev_whisper/small-15s"
     //   "/mnt/data4/hehaorui/large_15s"
       ],
     "test_directory_list": [

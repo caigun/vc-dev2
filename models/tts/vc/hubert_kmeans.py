@@ -58,8 +58,8 @@ class HubertWithKmeans(nn.Module):
 
     def __init__(
         self,
-        checkpoint_path= '/nfsmnt/share/hubert_base_ls960.pt',
-        kmeans_path = '/nfsmnt/share/hubert_base_ls960_L9_km500.bin',
+        checkpoint_path= '/mntnfs/lee_data1/caijunwang/resources/hubert_base_ls960.pt',
+        kmeans_path = '/mntnfs/lee_data1/caijunwang/resources/hubert_base_ls960_L9_km500.bin',
         target_sample_hz=16000,
         seq_len_multiple_of=None,
         output_layer=9,
