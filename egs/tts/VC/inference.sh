@@ -37,7 +37,7 @@ echo "Exprimental Configuration File: $exp_config"
 
 hubertold="/mnt/data2/hehaorui/ckpt/zs-vc-ckpt/vc_mls_clean/model.safetensors"
 whisperold="/mnt/data3/hehaorui/pretrained_models/VC/old_whisper/pytorch_model.bin"
-hubert="/mnt/data2/hehaorui/ckpt/vc_new_exp/new_mhubert/checkpoint/epoch-0001_step-0496002_loss-0.567479/model.safetensors"
+hubert="/mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp/new_mhubert/checkpoint/epoch-0005_step-0009935_loss-1.561842/pytorch_model.bin"
 hubert_se="/mnt/petrelfs/hehaorui/data/ckpt/vc/mhubert-noise-se/checkpoint/epoch-0000_step-0080000_loss-1.515860/pytorch_model.bin"
 whisper="/mnt/data2/hehaorui/ckpt/vc_new_exp/new_whisper/checkpoint/epoch-0000_step-0400001_loss-1.194134/model.safetensors"
 whisper_se="/mnt/data2/hehaorui/ckpt/vc_new_exp/new_whisper_aug/checkpoint/epoch-0000_step-0468003_loss-2.859798/model.safetensors"
@@ -46,20 +46,20 @@ hubert_se="/mnt/data2/hehaorui/ckpt/zs-vc-ckpt/epoch-0001_step-0796000_loss-0.56
 hubert_se_both="/mnt/data2/hehaorui/ckpt/vc_new_exp/new_mhubert_aug_spk_both/checkpoint/epoch-0001_step-0844000_loss-1.542532/model.safetensors"
 
 #模型的
-hubert_clean="xxx"
+hubert_clean="/mntnfs/lee_data1/vcdata/model.safetensors"
 hubert_ref_noise="xx"
 hubert_both_noise="xx"
 
 checkpoint_path=$hubert
 
 # gpu的编号：一般用6/7,换卡
-cuda_id=6
+cuda_id=0
 
 #prompt就是reference， target就是ground truth
-zero_shot_json_file_path="/mnt/data2/hehaorui/datasets/VCTK/zero_shot_json.json" #测试用例的json文件
-output_dir="/mnt/data2/hehaorui/exp_out" #
-vocoder_path="/mnt/data2/wangyuancheng/model_ckpts/ns2/bigvgan/g_00490000"
-wavlm_path="/mnt/data3/hehaorui/pretrained_models/wavlm/wavlm-base-plus-sv"
+zero_shot_json_file_path="/mntnfs/lee_data1/vcdata/VCTK/zero_shot_json.json" #测试用例的json文件
+output_dir="/mntnfs/lee_data1/vcdata/ckpt/out_test" #
+vocoder_path="/mntnfs/lee_data1/vcdata/g_00490000"
+wavlm_path="/mntnfs/lee_data1/vcdata/wavlm-base-plus-sv"
 #加一个ASR模型的path
 #用来算WER
 

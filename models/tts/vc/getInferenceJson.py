@@ -2,7 +2,7 @@ import os
 import json
 
 # Define the directories
-folder = '/mnt/data2/hehaorui/vc_test/VCTK'
+folder = '/mntnfs/lee_data1/vcdata/VCTK'
 gt_dir = folder + '/gt'
 prompt_dir = folder + '/prompt'
 source_dir =  folder + '/source'
@@ -38,6 +38,6 @@ for source_file, gt_file, prompt_file in zip(source_files, gt_files, prompt_file
         test_cases.append(test_case)
 
 # Save the test cases to a JSON file
-zero_shot_json_file_path = '/home/hehaorui/code/Amphion/egs/tts/VC/zero_shot_json.json'
+zero_shot_json_file_path = '/mntnfs/lee_data1/vcdata/VCTK/zero_shot_json.json'
 with open(zero_shot_json_file_path, 'w') as f:
     json.dump({"test_cases": test_cases}, f, indent=4)

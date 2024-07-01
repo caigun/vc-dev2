@@ -253,19 +253,19 @@ def main():
         torch.cuda.empty_cache()
     print("Generating Reconstructed Wav Files")
     os.system(
-        f"python /home/hehaorui/code/Amphion/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/recon/mel'} --output_dir={f'{args.output_dir}/recon/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/recon/mel'} --output_dir={f'{args.output_dir}/recon/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
     )
     print("Generating Target Wav Files")
     os.system(
-        f"python /home/hehaorui/code/Amphion/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/target/mel'} --output_dir={f'{args.output_dir}/target/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/target/mel'} --output_dir={f'{args.output_dir}/target/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
     )
     print("Generating Source Wav Files")
     os.system(
-        f"python /home/hehaorui/code/Amphion/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/source/mel'} --output_dir={f'{args.output_dir}/source/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/source/mel'} --output_dir={f'{args.output_dir}/source/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
     )
     print("Generating Prompt Wav Files")
     os.system(
-        f"python /home/hehaorui/code/Amphion/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/prompt/mel'} --output_dir={f'{args.output_dir}/prompt/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/prompt/mel'} --output_dir={f'{args.output_dir}/prompt/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
     )
     with torch.cuda.device(args.local_rank):
         torch.cuda.empty_cache()
@@ -273,7 +273,7 @@ def main():
     # 就已经有了全部的wav文件
     print("running vc_test.py")
     # sim-o
-    os.system(f"python /home/hehaorui/code/Amphion/models/tts/vc/vc_test.py --wavlm_path={args.wavlm_path} -r={f'{args.output_dir}/prompt/wav'} -d={f'{args.output_dir}/recon/wav'} --gpu {args.cuda_id}")
+    os.system(f"python /mntnfs/lee_data1/caijunwang/vc-dev2/models/tts/vc/vc_test.py --wavlm_path={args.wavlm_path} -r={f'{args.output_dir}/prompt/wav'} -d={f'{args.output_dir}/recon/wav'} --gpu {args.cuda_id}")
     # wer
     # gt text ASR model text
     # f'{args.output_dir}/recon/wav' 

@@ -19,7 +19,7 @@
         "tracker": ["tensorboard"],
         "max_epoch": 10,
         "save_checkpoint_stride": [1000],
-        "keep_last": [20],
+        "keep_last": [2],
         "run_eval": [true],
         "dataloader": {
           "num_worker": 64,
@@ -55,3 +55,4 @@
     "test_noise_dir": "/mntnfs/lee_data1/caijunwang/vc-dev2/MS-SNSD/noise_test"
   }
   }
+  
