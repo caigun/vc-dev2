@@ -12,7 +12,7 @@
       "metadata_dir": "metadata"
     },
     // Specify the output root path to save model ckpts and logs
-    "log_dir": "/mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp",
+    "log_dir": "/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp",
     "train": {
         // New trainer and Accelerator
         "gradient_accumulation_step": 1,
@@ -38,10 +38,11 @@
     }, 
   "trans_exp": {
     "directory_list":[
-    //   "/mnt/data4/hehaorui/medium_15s",
-      "/mntnfs/lee_data1/VCdev_whisper/small-15s"
-    //   "/mnt/data4/hehaorui/large_15s"
+        "/mntnfs/lee_data1/VCdev_whisper/small-15s"
       ],
+    "directory_whisper_list":[
+        "/mntnfs/lee_data1/VCdev_whisper/small-15s_whisper"
+    ]
     "test_directory_list": [
       "/mnt/data2/wangyuancheng/mls_english/test/audio"
     ],

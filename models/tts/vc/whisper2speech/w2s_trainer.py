@@ -304,12 +304,14 @@ class VCTrainer(TTSTrainer):
         batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
         speech = batch["speech"] 
-        ref_speech = batch["ref_speech"] 
+        ref_speech = batch["ref_speech"]
+        tar_speech = batch["tar_speech"]
         
         with torch.set_grad_enabled(False):
             # 提取需要的特征和光谱图
             mel = mel_spectrogram(speech).transpose(1, 2)
             ref_mel = mel_spectrogram(ref_speech).transpose(1, 2)
+            tar_mel = mel_spectrogram(tar_speech).transpose(1, 2)
             mask = batch["mask"]
             ref_mask = batch["ref_mask"]
             
@@ -365,7 +367,8 @@ class VCTrainer(TTSTrainer):
             total_loss += diff_loss_cond
             train_losses["source_loss"] = diff_loss_cond
 
-        diff_loss_x0 = diff_loss(diff_out["x0_pred"], mel, mask=mask)
+        # diff_loss_x0 = diff_loss(diff_out["x0_pred"], mel, mask=mask)
+        diff_loss_x0 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
         total_loss += diff_loss_x0
         train_losses["diff_loss_x0"] = diff_loss_x0
 

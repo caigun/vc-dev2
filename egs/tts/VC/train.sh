@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH -J vc
-#SBATCH -p p-A800
+#SBATCH -p p-A100
 #SBATCH -N 1
 #SBATCH -c 1
 #SBATCH -A T00120230002
-#SBATCH --gres=gpu:2
-#SBATCH --output result.out         ## filename of the output
+#SBATCH --gres=gpu:4
+#SBATCH --output result_new_hubert.out         ## filename of the output
 
 # Copyright (c) 2023 Amphion.
 #
@@ -39,7 +39,7 @@ if [ -z "$exp_config" ]; then
 fi
 echo "Exprimental Configuration File: $exp_config"
 
-exp_name="new_mhubert"
+exp_name="my_hubert_cont"
 
 if [ -z "$gpu" ]; then
     gpu="0,1,2,3"
@@ -55,4 +55,5 @@ CUDA_VISIBLE_DEVICES=$gpu accelerate launch --main_process_port 28500 \
     --log_level debug \
     --resume \
     --resume_type resume \
-    --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp/new_mhubert/checkpoint/final_epoch-0007_step-0012509_loss-2331.561784
+    --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp/my_hubert/checkpoint/final_epoch-0010_step-0013420_loss-2010.141515
+    # --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp/new_mhubert/checkpoint/final_epoch-0007_step-0012509_loss-2331.561784

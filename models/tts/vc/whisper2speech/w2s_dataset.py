@@ -45,8 +45,10 @@ class VCDataset(Dataset):
         print(f"Initializing VCDataset")
         if TRAIN_MODE:
             directory_list = args.directory_list
+            directory_whisper_list = args.directory_whisper_list
         else:
             directory_list = args.test_directory_list
+            directory_whisper_list = args.test_directory_whisper_list
         random.shuffle(directory_list)
 
         # 配置噪声和说话人使用
@@ -60,12 +62,12 @@ class VCDataset(Dataset):
     
         # number of workers
         print(f"Using {NUM_WORKERS} workers")
-        self.directory_list = directory_list
+        self.directory_list = zip(directory_list, directory_whisper_list)
         print(f"Loading {len(directory_list)} directories: {directory_list}")
 
         # Load metadata cache
         # metadata_cache: {file_path: num_frames}
-        self.metadata_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/vc/rp_metadata_cache.json'
+        self.metadata_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper/rp_metadata_cache.json'
         print(f"Loading metadata_cache from {self.metadata_cache_path}")
         if os.path.exists(self.metadata_cache_path):
             with open(self.metadata_cache_path, 'r', encoding='utf-8') as f:
@@ -77,7 +79,7 @@ class VCDataset(Dataset):
 
         # Load speaker cache
         # speaker_cache: {file_path: speaker}
-        self.speaker_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/vc/rp_file2speaker.json'
+        self.speaker_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper/rp_file2speaker.json'
         print(f"Loading speaker_cache from {self.speaker_cache_path}")
         if os.path.exists(self.speaker_cache_path):
             with open(self.speaker_cache_path, 'r', encoding='utf-8') as f:
@@ -89,9 +91,9 @@ class VCDataset(Dataset):
         
         self.files = []
         # Load all flac files
-        for directory in directory_list:
-            print(f"Loading {directory}")
-            files = self.get_flac_files(directory)
+        for directory, directory_whisper in directory_list:
+            print(f"Loading {directory} and {directory_whisper}")
+            files = self.get_flac_files(directory, directory_whisper)
             random.shuffle(files)
             self.files.extend(files)
             del files
@@ -158,14 +160,34 @@ class VCDataset(Dataset):
             print(f"Skipping processing speakers, loaded {len(self.speaker_cache)} files")
         return self.speaker_cache
 
-    def get_flac_files(self, directory):
+    # def get_flac_files(self, directory):
+    #     flac_files = []
+    #     for root, dirs, files in os.walk(directory):
+    #         for file in files:
+    #             if file.endswith("_output.flac") or file.endswith("_output.wav"):
+    #                 # Remove the "_output" part and keep the extension
+    #                 new_file = file.replace("_output", "")
+    #                 flac_files.append((os.path.join(root, new_file), os.path.join(root, file)))
+    #     return flac_files
+
+    def get_flac_files(self, normal_directory, whispered_directory):
         flac_files = []
-        for root, dirs, files in os.walk(directory):
+        
+        # Walk through the normal speech directory
+        for root, dirs, files in os.walk(normal_directory):
             for file in files:
-                if file.endswith("_output.flac") or file.endswith("_output.wav"):
-                    # Remove the "_output" part and keep the extension
-                    new_file = file.replace("_output", "")
-                    flac_files.append((os.path.join(root, new_file), os.path.join(root, file)))
+                if file.endswith(".wav"):
+                    # Get the relative path of the normal speech file
+                    relative_path = os.path.relpath(os.path.join(root, file), normal_directory)
+                    
+                    # Corresponding whispered speech file path
+                    whispered_path = os.path.join(whispered_directory, relative_path.replace(".wav", "_whispered.wav"))
+                    
+                    # Check if the whispered file exists
+                    assert os.path.exists(whispered_path), f"Whispered speech file not found: {whispered_path}"
+                    
+                    flac_files.append((os.path.join(root, file), whispered_path))
+        
         return flac_files
 
     def get_all_flac(self, directory):
@@ -192,7 +214,7 @@ class VCDataset(Dataset):
         index2speaker = {}
         for file, wfile in self.files:
             num_frames = metadata_cache[file]
-            if SAMPLE_RATE * 3 <= num_frames <= SAMPLE_RATE * 15:
+            if SAMPLE_RATE * 3 <= num_frames <= SAMPLE_RATE * 30:
                 filtered_files.append((file, wfile))
                 all_num_frames.append(num_frames)
                 index2speaker[len(filtered_files) - 1] = speaker_cache[file]
@@ -286,15 +308,15 @@ class VCDataset(Dataset):
         if len(speech) > 30 * SAMPLE_RATE:
             speech = speech[:30 * SAMPLE_RATE]
             # wspeech = wspeech[:30 * SAMPLE_RATE]
-        speech = torch.tensor(speech, dtype=torch.float32)
+        speech = torch.tensor(wspeech, dtype=torch.float32)
         # inputs = torch.tensor(wspeech, dtype=torch.float32)
-        inputs = self._get_reference_vc(speech, wspeech hop_length=200)
+        inputs = self._get_reference_vc(wspeech, speech, hop_length=200)
         speaker = self.index2speaker[idx]
         speaker_id = self.speaker2id[speaker]
         inputs["speaker_id"] = speaker_id
         return inputs
     
-    def _get_reference_vc(self, speech, wspeech, hop_length):
+    def _get_reference_vc(self, wspeech, speech, hop_length):
         pad_size = 1600 - speech.shape[0] % 1600
         speech = torch.nn.functional.pad(speech, (0, pad_size)) # 保证语音长度是1600的倍数
         wspeech = torch.nn.functional.pad(wspeech, (0, pad_size))
@@ -307,11 +329,12 @@ class VCDataset(Dataset):
 
         ref_speech = speech[start_frames * hop_length : end_frames * hop_length]
         new_speech = torch.cat((wspeech[:start_frames * hop_length], wspeech[end_frames * hop_length:]), 0)
+        tar_speech = torch.cat((speech[:start_frames * hop_length], wspeech[end_frames * hop_length:]), 0)
 
         ref_mask = torch.ones(len(ref_speech) // hop_length)
         mask = torch.ones(len(new_speech) // hop_length)
 
-        return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask}
+        return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
     
         # elif self.use_source_noise and self.use_ref_noise:
         #     # 使用噪声

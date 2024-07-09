@@ -118,7 +118,12 @@ def main():
     if "pytorch_model.bin" in ckpt_path:
         model.load_state_dict(torch.load(ckpt_path))
     elif "model.safetensors" in ckpt_path:
+        #breakpoint()
         load_model(model, ckpt_path)
+        #torch.save(model.state_dict(),"/mntnfs/lee_data1/vcdata/epoch-0002_step-0689002_loss-0.571602/pytorch_model.bin")
+        #breakpoint()
+    else:
+        raise ValueError("Invalid model!")
     print("model loaded")
     model.cuda(args.local_rank)
     model.eval()
@@ -167,8 +172,8 @@ def main():
     temp_id = 0
     all_keys = utt_dict.keys()
     # random sample 20 samples
-    # sample_keys = list(utt_dict.keys())[:10]
-    sample_keys = list(utt_dict.keys())
+    sample_keys = list(utt_dict.keys())[:10]
+    # sample_keys = list(utt_dict.keys())
     # 应该有30个
     for utt_id in tqdm(sample_keys):
         utt = utt_dict[utt_id]
