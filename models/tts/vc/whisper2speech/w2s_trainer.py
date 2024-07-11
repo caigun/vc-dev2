@@ -21,7 +21,7 @@ import accelerate
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration
 
-from models.tts.vc.ns2_uniamphion import UniAmphionVC
+from models.tts.vc.whisper2speech.ns2_uniamphion import UniAmphionVC
 from models.tts.vc.whisper2speech.w2s_dataset import  VCCollator, VCDataset, batch_by_size
 from models.tts.vc.hubert_kmeans import HubertWithKmeans
 from models.tts.vc.whisper_feature import WhisperNormal
@@ -29,7 +29,7 @@ from models.tts.vc.vc_loss import diff_loss, ConstractiveSpeakerLoss
 from models.tts.vc.vc_utils import mel_spectrogram, extract_world_f0
 
 
-class VCTrainer(TTSTrainer):
+class WVCTrainer(TTSTrainer):
     def __init__(self, args, cfg):
         self.args = args
         self.cfg = cfg
@@ -305,7 +305,7 @@ class VCTrainer(TTSTrainer):
 
         speech = batch["speech"] 
         ref_speech = batch["ref_speech"]
-        tar_speech = batch["tar_speech"]
+        tar_speech = batch["target"]
         
         with torch.set_grad_enabled(False):
             # 提取需要的特征和光谱图
@@ -347,7 +347,7 @@ class VCTrainer(TTSTrainer):
             )
         else:
             diff_out, (ref_emb, _), (cond_emb, _) = self.model(
-                x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+                x=mel, content_feature=content_feature, pitch=None, x_ref=ref_mel,
                 x_mask=mask, x_ref_mask=ref_mask
             )
 
@@ -368,7 +368,16 @@ class VCTrainer(TTSTrainer):
             train_losses["source_loss"] = diff_loss_cond
 
         # diff_loss_x0 = diff_loss(diff_out["x0_pred"], mel, mask=mask)
-        diff_loss_x0 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
+        # diff_loss_x0 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
+        # total_loss += diff_loss_x0
+        # train_losses["diff_loss_x0"] = diff_loss_x0
+
+        # diff_loss_noise = diff_loss(diff_out["noise_pred"], diff_out["noise"], mask=mask)
+        # total_loss += diff_loss_noise
+        # train_losses["diff_loss_noise"] = diff_loss_noise
+        # train_losses["total_loss"] = total_loss
+
+        diff_loss_x0 = F.mse_loss(diff_out["x0_pred"], tar_mel)
         total_loss += diff_loss_x0
         train_losses["diff_loss_x0"] = diff_loss_x0
 

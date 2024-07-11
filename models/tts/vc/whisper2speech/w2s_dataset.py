@@ -91,13 +91,13 @@ class VCDataset(Dataset):
         
         self.files = []
         # Load all flac files
-        for directory, directory_whisper in directory_list:
+        for directory, directory_whisper in self.directory_list:
             print(f"Loading {directory} and {directory_whisper}")
             files = self.get_flac_files(directory, directory_whisper)
             random.shuffle(files)
             self.files.extend(files)
             del files
-            print(f"Now {len(files)} files.")
+            print(f"Now {len(self.files)} files.")
             self.meta_data_cache = self.process_files()
             self.speaker_cache = self.process_speakers()
             temp_cache_path = self.metadata_cache_path.replace('.json', f'_{directory.split("/")[-1]}.json')
@@ -181,7 +181,7 @@ class VCDataset(Dataset):
                     relative_path = os.path.relpath(os.path.join(root, file), normal_directory)
                     
                     # Corresponding whispered speech file path
-                    whispered_path = os.path.join(whispered_directory, relative_path.replace(".wav", "_whispered.wav"))
+                    whispered_path = os.path.join(whispered_directory, relative_path.replace(".wav", "_whisper.wav"))
                     
                     # Check if the whispered file exists
                     assert os.path.exists(whispered_path), f"Whispered speech file not found: {whispered_path}"
@@ -308,7 +308,8 @@ class VCDataset(Dataset):
         if len(speech) > 30 * SAMPLE_RATE:
             speech = speech[:30 * SAMPLE_RATE]
             # wspeech = wspeech[:30 * SAMPLE_RATE]
-        speech = torch.tensor(wspeech, dtype=torch.float32)
+        wspeech = torch.tensor(wspeech, dtype=torch.float32)
+        speech = torch.tensor(speech, dtype=torch.float32)
         # inputs = torch.tensor(wspeech, dtype=torch.float32)
         inputs = self._get_reference_vc(wspeech, speech, hop_length=200)
         speaker = self.index2speaker[idx]
@@ -329,7 +330,7 @@ class VCDataset(Dataset):
 
         ref_speech = speech[start_frames * hop_length : end_frames * hop_length]
         new_speech = torch.cat((wspeech[:start_frames * hop_length], wspeech[end_frames * hop_length:]), 0)
-        tar_speech = torch.cat((speech[:start_frames * hop_length], wspeech[end_frames * hop_length:]), 0)
+        tar_speech = torch.cat((speech[:start_frames * hop_length], speech[end_frames * hop_length:]), 0)
 
         ref_mask = torch.ones(len(ref_speech) // hop_length)
         mask = torch.ones(len(new_speech) // hop_length)
@@ -379,6 +380,10 @@ class VCCollator(BaseCollator):
         # Process 'ref_speech' data
         ref_speeches = [process_tensor(b['ref_speech']) for b in batch]
         packed_batch_features['ref_speech'] = pad_sequence(ref_speeches, batch_first=True, padding_value=0)
+
+        # Process 'target' data
+        target = [process_tensor(b['target']) for b in batch]
+        packed_batch_features['target'] = pad_sequence(target, batch_first=True, padding_value=0)
 
         # Process 'mask' data
         masks = [process_tensor(b['mask']) for b in batch]

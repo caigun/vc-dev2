@@ -10,12 +10,14 @@ import torch
 from models.tts.valle.valle_trainer import VALLETrainer
 from models.tts.vc.vc_trainer import VCTrainer
 from utils.util import load_config
+from models.tts.vc.whisper2speech.w2s_trainer import WVCTrainer
 
 
 
 def build_trainer(args, cfg):
     supported_trainer = {
         "VC": VCTrainer,
+        "VCwhisper": WVCTrainer,
     }
     trainer_class = supported_trainer[cfg.model_type]
     trainer = trainer_class(args, cfg)
