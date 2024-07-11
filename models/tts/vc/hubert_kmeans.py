@@ -58,10 +58,10 @@ class HubertWithKmeans(nn.Module):
 
     def __init__(
         self,
-        # checkpoint_path= '/mntnfs/lee_data1/vcdata/mhubert/mhubert_base_vp_en_es_fr_it3.pt',
-        # kmeans_path = '/mntnfs/lee_data1/vcdata/mhubert/mhubert_base_vp_en_es_fr_it3_L11_km1000.bin',
-        checkpoint_path = '/mntnfs/lee_data1/caijunwang/fairseq/None/checkpoints/checkpoint_95_400000.pt',
-        kmeans_path = '/mntnfs/lee_data1/caijunwang/lib/hubert/result/kmeans_train.pkl',
+        checkpoint_path= '/mntnfs/lee_data1/vcdata/mhubert/mhubert_base_vp_en_es_fr_it3.pt',
+        kmeans_path = '/mntnfs/lee_data1/vcdata/mhubert/mhubert_base_vp_en_es_fr_it3_L11_km1000.bin',
+        # checkpoint_path = '/mntnfs/lee_data1/caijunwang/fairseq/None/checkpoints/checkpoint_95_400000.pt',
+        # kmeans_path = '/mntnfs/lee_data1/caijunwang/lib/hubert/result/kmeans_train.pkl',
         target_sample_hz=16000,
         seq_len_multiple_of=None,
         output_layer=9,

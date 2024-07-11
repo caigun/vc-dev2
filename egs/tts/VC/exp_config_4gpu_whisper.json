@@ -1,5 +1,5 @@
 {
-    "base_config": "egs/tts/VC/exp_config_base.json",
+    "base_config": "egs/tts/VC/exp_config_whisper_base.json",
     "dataset": [
       "librilight"
     ],
@@ -19,18 +19,18 @@
         "tracker": ["tensorboard"],
         "max_epoch": 20,
         "save_checkpoint_stride": [1000],
-        "keep_last": [2],
+        "keep_last": [5],
         "run_eval": [true],
         "dataloader": {
           "num_worker": 64,
           "pin_memory": true
         },
         "adam": {
-            "lr": 5e-5
+            "lr": 1e-4
         },
         "use_dynamic_batchsize": true,
-        "batch_size": 12,
-        "max_tokens": 4800000,
+        "batch_size": 8,
+        "max_tokens": 3200000,
         "max_sentences": 64,
         "lr_warmup_steps": 5000,
         "lr_scheduler": "cosine",
@@ -42,7 +42,7 @@
       ],
     "directory_whisper_list":[
         "/mntnfs/lee_data1/VCdev_whisper/small-15s_whisper"
-    ]
+    ],
     "test_directory_list": [
       "/mnt/data2/wangyuancheng/mls_english/test/audio"
     ],

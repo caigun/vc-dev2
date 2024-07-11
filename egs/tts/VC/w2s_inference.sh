@@ -67,14 +67,16 @@ hubert_clean="/mntnfs/lee_data1/vcdata/epoch-0002_step-0689002_loss-0.571602/mod
 hubert_ref_noise="xx"
 hubert_both_noise="xx"
 
-checkpoint_path=$my_hubert
+my_hubert_whisper="/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0_mseloss/checkpoint/epoch-0005_step-0011000_loss-0.454317/pytorch_model.bin"
+
+checkpoint_path=$my_hubert_whisper
 
 # gpu的编号：一般用6/7,换卡
 cuda_id=0
 
 #prompt就是reference， target就是ground truth
-zero_shot_json_file_path="/mntnfs/lee_data1/vcdata/VCTK/zero_shot_json.json" #测试用例的json文件
-output_dir="/mntnfs/lee_data1/vcdata/ckpt/out_test" #
+zero_shot_json_file_path="/mntnfs/lee_data1/vcdata/VCTK_whisper/zero_shot_json.json" #测试用例的json文件
+output_dir="/mntnfs/lee_data1/vcdata/ckpt/out_w2s"
 vocoder_path="/mntnfs/lee_data1/vcdata/g_00490000"
 wavlm_path="/mntnfs/lee_data1/vcdata/wavlm-base-plus-sv"
 #加一个ASR模型的path
@@ -89,14 +91,14 @@ echo "Vocoder Path: $vocoder_path"
 echo "WavLM Path: $wavlm_path"
 
 # both clean
-python "${work_dir}"/models/tts/vc/vc_inference.py \
+python "${work_dir}"/models/tts/vc/whisper2speech/w2s_inference.py \
     --config $exp_config \
     --checkpoint_path $checkpoint_path \
     --zero_shot_json_file_path $zero_shot_json_file_path \
     --output_dir $output_dir \
     --cuda_id ${cuda_id} \
     --vocoder_path $vocoder_path \
-    --wavlm_path $wavlm_path 
+    --wavlm_path $wavlm_path
 
 # # 测试的reference是脏的
 # python "${work_dir}"/models/tts/vc/vc_inference.py \
