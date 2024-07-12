@@ -67,7 +67,7 @@ hubert_clean="/mntnfs/lee_data1/vcdata/epoch-0002_step-0689002_loss-0.571602/mod
 hubert_ref_noise="xx"
 hubert_both_noise="xx"
 
-my_hubert_whisper="/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0_mseloss/checkpoint/epoch-0005_step-0011000_loss-0.454317/pytorch_model.bin"
+my_hubert_whisper="/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0/checkpoint/final_epoch-0020_step-0039520_loss-2147.519705/pytorch_model.bin"
 
 checkpoint_path=$my_hubert_whisper
 

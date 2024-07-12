@@ -40,7 +40,7 @@ if [ -z "$exp_config" ]; then
 fi
 echo "Exprimental Configuration File: $exp_config"
 
-exp_name="my_hubert_whisper_nof0_mseloss"
+exp_name="my_hubert_whisper_nof0_mse"
 
 if [ -z "$gpu" ]; then
     gpu="0,1,2,3"
