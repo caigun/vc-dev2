@@ -12,11 +12,51 @@ from multiprocessing import Pool, Lock
 import random
 import torchaudio
 import rir_generator as rir
-
+import time
+import ctypes
+# from models.tts.vc.whisper2speech.s2w import s2w
 
 NUM_WORKERS = 64
 lock = Lock()  # 创建一个全局锁
 SAMPLE_RATE = 16000
+lib=ctypes.CDLL("/mntnfs/lee_data1/caijunwang/vc-dev2/models/tts/vc/whisper2speech/toWhisper/libtoWhisper.so")
+def process_audio(normal_path,output_path, work_dir):
+    input_path = normal_path
+    output_file = output_path 
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    # Create argv parameters
+    argv = [b"./toWhisper", b"-o", output_file.encode(), b"-l", b"0.6",input_path.encode()]
+    argc = len(argv)
+    argv_array = (ctypes.POINTER(ctypes.c_char) * (argc + 1))()
+    for i, arg in enumerate(argv):
+        argv_array[i] = ctypes.create_string_buffer(arg)
+    argv_array[argc] = None
+    
+    # Call genwave function
+    result = lib.main(argc, argv_array)
+    if result != 0:
+        print(f"Failed to process {input_path}: {result}")
+    else:
+        return input_path
+def get_normal_and_whisper(normal_path, temp_path, work_dir):
+    # t0 = time.time()
+    #filename = "{}.wav".format(normal_path.split(".")[-2])
+    filename = os.path.basename(normal_path)
+    output_path = os.path.join(temp_path, filename)
+    opath = os.getcwd()
+    os.chdir(work_dir)
+    #os.system("./toWhisper -o \"{}\" -l 0.6 \"{}\"".format(output_path, normal_path))
+    #breakpoint()
+    process_audio(normal_path, output_path, work_dir)
+    speech, _ = librosa.load(normal_path, sr=SAMPLE_RATE)
+    # wspeech, _, _ = s2w(speech, mode='wave', samplerate=SAMPLE_RATE)
+    # wspeech = speech.copy()
+    wspeech, _ = librosa.load(output_path, sr=SAMPLE_RATE)
+    os.remove(output_path)
+    os.chdir(opath)
+    t1 = time.time()
+    # print(t1-t0)
+    return speech, wspeech
 
 def get_metadata(file_path):
     metadata = torchaudio.info(file_path)
@@ -45,11 +85,12 @@ class VCDataset(Dataset):
         print(f"Initializing VCDataset")
         if TRAIN_MODE:
             directory_list = args.directory_list
-            directory_whisper_list = args.directory_whisper_list
         else:
             directory_list = args.test_directory_list
-            directory_whisper_list = args.test_directory_whisper_list
         random.shuffle(directory_list)
+
+        self.toWhisper_path = args.toWhisper_path
+        self.temp_file_path = args.temp_file_path
 
         # 配置噪声和说话人使用
         self.use_source_noise = args.use_source_noise
@@ -62,12 +103,12 @@ class VCDataset(Dataset):
     
         # number of workers
         print(f"Using {NUM_WORKERS} workers")
-        self.directory_list = zip(directory_list, directory_whisper_list)
+        self.directory_list = directory_list
         print(f"Loading {len(directory_list)} directories: {directory_list}")
 
         # Load metadata cache
         # metadata_cache: {file_path: num_frames}
-        self.metadata_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper/rp_metadata_cache.json'
+        self.metadata_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/w2s/rp_metadata_cache.json'
         print(f"Loading metadata_cache from {self.metadata_cache_path}")
         if os.path.exists(self.metadata_cache_path):
             with open(self.metadata_cache_path, 'r', encoding='utf-8') as f:
@@ -79,7 +120,7 @@ class VCDataset(Dataset):
 
         # Load speaker cache
         # speaker_cache: {file_path: speaker}
-        self.speaker_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper/rp_file2speaker.json'
+        self.speaker_cache_path = '/mntnfs/lee_data1/caijunwang/ckpt/w2s/rp_file2speaker.json'
         print(f"Loading speaker_cache from {self.speaker_cache_path}")
         if os.path.exists(self.speaker_cache_path):
             with open(self.speaker_cache_path, 'r', encoding='utf-8') as f:
@@ -91,9 +132,9 @@ class VCDataset(Dataset):
         
         self.files = []
         # Load all flac files
-        for directory, directory_whisper in self.directory_list:
-            print(f"Loading {directory} and {directory_whisper}")
-            files = self.get_flac_files(directory, directory_whisper)
+        for directory in self.directory_list:
+            print(f"Loading {directory}")
+            files = self.get_flac_files(directory)
             random.shuffle(files)
             self.files.extend(files)
             del files
@@ -135,8 +176,7 @@ class VCDataset(Dataset):
 
     def process_files(self):
         print(f"Processing metadata...")
-        files_to_process = [file for (file, wfile) in self.files if file not in self.metadata_cache]+\
-                            [wfile for (file, wfile) in self.files if wfile not in self.metadata_cache]
+        files_to_process = [file for file in self.files if file not in self.metadata_cache]
         if files_to_process:
             with Pool(processes=NUM_WORKERS) as pool:
                 results = list(tqdm(pool.imap_unordered(get_metadata, files_to_process), total=len(files_to_process)))
@@ -149,7 +189,7 @@ class VCDataset(Dataset):
 
     def process_speakers(self):
         print(f"Processing speakers...")
-        files_to_process = [file for (file, wfile) in self.files if file not in self.speaker_cache]
+        files_to_process = [file for file in self.files if file not in self.speaker_cache]
         if files_to_process:
             with Pool(processes=NUM_WORKERS) as pool:
                 results = list(tqdm(pool.imap_unordered(get_speaker, files_to_process), total=len(files_to_process)))
@@ -160,35 +200,33 @@ class VCDataset(Dataset):
             print(f"Skipping processing speakers, loaded {len(self.speaker_cache)} files")
         return self.speaker_cache
 
-    # def get_flac_files(self, directory):
-    #     flac_files = []
-    #     for root, dirs, files in os.walk(directory):
-    #         for file in files:
-    #             if file.endswith("_output.flac") or file.endswith("_output.wav"):
-    #                 # Remove the "_output" part and keep the extension
-    #                 new_file = file.replace("_output", "")
-    #                 flac_files.append((os.path.join(root, new_file), os.path.join(root, file)))
-    #     return flac_files
-
-    def get_flac_files(self, normal_directory, whispered_directory):
+    def get_flac_files(self, directory):
         flac_files = []
-        
-        # Walk through the normal speech directory
-        for root, dirs, files in os.walk(normal_directory):
+        for root, dirs, files in os.walk(directory):
             for file in files:
-                if file.endswith(".wav"):
-                    # Get the relative path of the normal speech file
-                    relative_path = os.path.relpath(os.path.join(root, file), normal_directory)
-                    
-                    # Corresponding whispered speech file path
-                    whispered_path = os.path.join(whispered_directory, relative_path.replace(".wav", "_whisper.wav"))
-                    
-                    # Check if the whispered file exists
-                    assert os.path.exists(whispered_path), f"Whispered speech file not found: {whispered_path}"
-                    
-                    flac_files.append((os.path.join(root, file), whispered_path))
-        
+                if file.endswith(".flac") or file.endswith(".wav"):
+                    flac_files.append(os.path.join(root, file))
         return flac_files
+
+    # def get_flac_files(self, normal_directory, whispered_directory): # this is for prepared aligned normal speecha and whispered speech
+    #     flac_files = []
+        
+    #     # Walk through the normal speech directory
+    #     for root, dirs, files in os.walk(normal_directory):
+    #         for file in files:
+    #             if file.endswith(".wav"):
+    #                 # Get the relative path of the normal speech file
+    #                 relative_path = os.path.relpath(os.path.join(root, file), normal_directory)
+                    
+    #                 # Corresponding whispered speech file path
+    #                 whispered_path = os.path.join(whispered_directory, relative_path.replace(".wav", "_whisper.wav"))
+                    
+    #                 # Check if the whispered file exists
+    #                 assert os.path.exists(whispered_path), f"Whispered speech file not found: {whispered_path}"
+                    
+    #                 flac_files.append((os.path.join(root, file), whispered_path))
+        
+    #     return flac_files
 
     def get_all_flac(self, directory):
         directories = [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
@@ -212,10 +250,10 @@ class VCDataset(Dataset):
         all_num_frames = []
         index2numframes = {}
         index2speaker = {}
-        for file, wfile in self.files:
+        for file in self.files:
             num_frames = metadata_cache[file]
             if SAMPLE_RATE * 3 <= num_frames <= SAMPLE_RATE * 30:
-                filtered_files.append((file, wfile))
+                filtered_files.append(file)
                 all_num_frames.append(num_frames)
                 index2speaker[len(filtered_files) - 1] = speaker_cache[file]
                 index2numframes[len(filtered_files) - 1] = num_frames
@@ -302,12 +340,18 @@ class VCDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
-        file_path, wfile_path = self.filtered_files[idx]
-        speech, _ = librosa.load(file_path, sr=SAMPLE_RATE)
-        wspeech, _ = librosa.load(wfile_path, sr=SAMPLE_RATE)
+        file_path = self.filtered_files[idx]
+        speech, wspeech = get_normal_and_whisper(file_path,
+                                                 self.temp_file_path,
+                                                 self.toWhisper_path)
+                                                #  "/mntnfs/lee_data1/caijunwang/ckpt/temp",
+                                                #  "/mntnfs/lee_data1/caijunwang/lib/toWhisper")
+        # import soundfile as sf
+        #sf.write("/mntnfs/lee_data1/caijunwang/resources/output.wav", speech, 16000)
+        #assert 0
         if len(speech) > 30 * SAMPLE_RATE:
             speech = speech[:30 * SAMPLE_RATE]
-            # wspeech = wspeech[:30 * SAMPLE_RATE]
+            wspeech = wspeech[:30 * SAMPLE_RATE]
         wspeech = torch.tensor(wspeech, dtype=torch.float32)
         speech = torch.tensor(speech, dtype=torch.float32)
         # inputs = torch.tensor(wspeech, dtype=torch.float32)
