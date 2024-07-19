@@ -1202,11 +1202,12 @@ class JsonHParams:
 
 
 class UniAmphionVC(nn.Module):
-    def __init__(self, cfg, use_source_noise = False, use_ref_noise = False):
+    def __init__(self, cfg, use_source_noise = False, use_ref_noise = False, use_avg_pitch = False):
         super().__init__()
         self.cfg = cfg
         self.use_source_noise = use_source_noise
         self.use_ref_noise = use_ref_noise
+        self.use_avg_pitch = use_avg_pitch
         self.reference_encoder = ReferenceEncoder(cfg=cfg.reference_encoder)
         if cfg.diffusion.diff_model_type == "Transformer":
             self.diffusion = Diffusion(
@@ -1220,7 +1221,10 @@ class UniAmphionVC(nn.Module):
             )
         else:
             raise NotImplementedError()
-        pitch_dim = 0
+        if self.use_avg_pitch==True:
+            pitch_dim = 1
+        else:
+            pitch_dim = 0
         self.content_f0_enc = nn.Sequential(
             nn.LayerNorm(
                 cfg.vc_feature.content_feature_dim + pitch_dim
@@ -1259,10 +1263,11 @@ class UniAmphionVC(nn.Module):
         # pitch: B x T x 1
         # B x t x D+1
         # 2B x T
-        # condition_embedding = torch.cat([content_feature, pitch[:, :, None]], dim=-1)
-        # condition_embedding = self.content_f0_enc(condition_embedding)
-
-        condition_embedding = self.content_f0_enc(content_feature.clone())
+        if pitch is not None:
+            condition_embedding = torch.cat([content_feature, pitch[:, :, None]], dim=-1)
+            condition_embedding = self.content_f0_enc(condition_embedding)
+        else:
+            condition_embedding = self.content_f0_enc(content_feature.clone())
 
         # 2B x T x D
 
@@ -1305,10 +1310,11 @@ class UniAmphionVC(nn.Module):
             x_ref=x_ref, key_padding_mask=x_ref_mask
         )
 
-        # condition_embedding = torch.cat([content_feature, pitch[:, :, None]], dim=-1)
-        # condition_embedding = self.content_f0_enc(condition_embedding)
-
-        condition_embedding = self.content_f0_enc(content_feature.clone())
+        if pitch is not None:
+            condition_embedding = torch.cat([content_feature, pitch[:, :, None]], dim=-1)
+            condition_embedding = self.content_f0_enc(condition_embedding)
+        else:
+            condition_embedding = self.content_f0_enc(content_feature.clone())
 
         bsz, l, _ = condition_embedding.shape
         if self.cfg.diffusion.diff_model_type == "Transformer":
@@ -1333,6 +1339,16 @@ class UniAmphionVC(nn.Module):
             reference_embedding=reference_embedding,
             n_timesteps=inference_steps,
         )
+
+        # print(mask.shape, x.shape, condition_embedding.shape, reference_embedding.shape)
+        # diff_out = self.diffusion(
+        #     x=x,
+        #     condition_embedding=condition_embedding,
+        #     x_mask=mask,
+        #     reference_embedding=reference_embedding,
+        # )
+        # x0 = diff_out["x0_pred"]
+
 
         return x0
     
