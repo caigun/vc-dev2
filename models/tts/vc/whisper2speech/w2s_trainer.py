@@ -49,6 +49,12 @@ class WVCTrainer(TTSTrainer):
         self.use_ref_noise = self.cfg.trans_exp.use_ref_noise
         self.use_speaker = self.cfg.trans_exp.use_speaker
 
+        # configure whether to use average pitch to be pitch
+        self.use_avg_pitch = self.cfg.trans_exp.use_avg_pitch
+
+        # configure whether to use normal speech as input while training
+        self.use_normal_as_input = self.cfg.trans_exp.use_normal_as_input
+
         # 在主进程中记录配置信息
         if self.accelerator.is_main_process:
             self.logger.info(f"use_source_noise: {self.use_source_noise}")
@@ -197,7 +203,7 @@ class WVCTrainer(TTSTrainer):
     def _build_model(self):
         w2v  = HubertWithKmeans()
         self.cfg.model.vc_feature.content_feature_dim = 768
-        model = UniAmphionVC(cfg=self.cfg.model, use_ref_noise=self.use_ref_noise, use_source_noise=self.use_source_noise)
+        model = UniAmphionVC(cfg=self.cfg.model, use_ref_noise=self.use_ref_noise, use_source_noise=self.use_source_noise, use_avg_pitch=self.use_avg_pitch)
         return model, w2v
 
     def _build_dataset(self):
@@ -302,6 +308,8 @@ class WVCTrainer(TTSTrainer):
 
         # 将所有Tensor类型的数据迁移到指定设备
         batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        # print(batch.keys(), batch["speech"].shape)
+        # assert 0
 
         speech = batch["speech"] 
         ref_speech = batch["ref_speech"]
@@ -312,13 +320,27 @@ class WVCTrainer(TTSTrainer):
             mel = mel_spectrogram(speech).transpose(1, 2)
             ref_mel = mel_spectrogram(ref_speech).transpose(1, 2)
             tar_mel = mel_spectrogram(tar_speech).transpose(1, 2)
+
+            # import matplotlib.pyplot as plt
+            # plt.imshow(tar_mel[0,:,:].cpu().numpy())
+            # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/tar_mel.png")
+            # plt.imshow(mel[0,:,:].cpu().numpy())
+            # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/mel.png")
+            # plt.imshow(ref_mel[0,:,:].cpu().numpy())
+            # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/ref_mel.png")
+            # assert 0
+
             mask = batch["mask"]
             ref_mask = batch["ref_mask"]
             
             # 提取 pitch 和 content_feature
             if not self.use_source_noise:
-                pitch = extract_world_f0(speech)
-                pitch = (pitch - pitch.mean(dim=1, keepdim=True)) / (pitch.std(dim=1, keepdim=True) + 1e-6) # Normalize pitch (B,T)
+                if self.use_avg_pitch:
+                    pitch = extract_world_f0(ref_speech)
+                    pitch = pitch.mean(dim=1, keepdim=True)
+                    # pitch = (pitch - pitch.mean(dim=1, keepdim=True)) / (pitch.std(dim=1, keepdim=True) + 1e-6) # Normalize pitch (B,T)
+                else:
+                    pitch = None
                 _, content_feature = self.w2v(speech) # semantic (B, T, 768)
 
             if self.use_ref_noise:
@@ -350,26 +372,31 @@ class WVCTrainer(TTSTrainer):
                 x=mel, content_feature=content_feature, pitch=None, x_ref=ref_mel,
                 x_mask=mask, x_ref_mask=ref_mask
             )
+            if self.use_normal_as_input:
+                diff_out_from_normal, (ref_emb, _), (cond_emb, _) = self.model(
+                    x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+                    x_mask=mask, x_ref_mask=ref_mask
+                )
 
-        if self.use_ref_noise:
-            # B x N_query x D 
-            ref_emb = torch.mean(ref_emb, dim=1) # B x D
-            noisy_ref_emb = torch.mean(noisy_ref_emb, dim=1) # B x D
-            all_ref_emb = torch.cat([ref_emb, noisy_ref_emb], dim=0) # 2B x D
-            all_speaker_ids = torch.cat([batch["speaker_id"], batch["speaker_id"]], dim=0) # 2B
-            cs_loss = self.contrastive_speaker_loss(all_ref_emb, all_speaker_ids) * 0.25
-            total_loss += cs_loss
-            train_losses["ref_loss"] = cs_loss
+        # if self.use_ref_noise:
+        #     # B x N_query x D 
+        #     ref_emb = torch.mean(ref_emb, dim=1) # B x D
+        #     noisy_ref_emb = torch.mean(noisy_ref_emb, dim=1) # B x D
+        #     all_ref_emb = torch.cat([ref_emb, noisy_ref_emb], dim=0) # 2B x D
+        #     all_speaker_ids = torch.cat([batch["speaker_id"], batch["speaker_id"]], dim=0) # 2B
+        #     cs_loss = self.contrastive_speaker_loss(all_ref_emb, all_speaker_ids) * 0.25
+        #     total_loss += cs_loss
+        #     train_losses["ref_loss"] = cs_loss
 
-        if self.use_source_noise:
-            # B x T x D
-            diff_loss_cond = F.l1_loss(noisy_cond_emb, cond_emb, reduction="mean") * 2.0
-            total_loss += diff_loss_cond
-            train_losses["source_loss"] = diff_loss_cond
+        # if self.use_source_noise:
+        #     # B x T x D
+        #     diff_loss_cond = F.l1_loss(noisy_cond_emb, cond_emb, reduction="mean") * 2.0
+        #     total_loss += diff_loss_cond
+        #     train_losses["source_loss"] = diff_loss_cond
 
         # diff_loss_x0 = diff_loss(diff_out["x0_pred"], mel, mask=mask)
-        # diff_loss_x0 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
-        # total_loss += diff_loss_x0
+        # diff_loss_x0_1 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
+        # total_loss += diff_loss_x0_1
         # train_losses["diff_loss_x0"] = diff_loss_x0
 
         # diff_loss_noise = diff_loss(diff_out["noise_pred"], diff_out["noise"], mask=mask)
@@ -377,13 +404,30 @@ class WVCTrainer(TTSTrainer):
         # train_losses["diff_loss_noise"] = diff_loss_noise
         # train_losses["total_loss"] = total_loss
 
-        diff_loss_x0 = F.mse_loss(diff_out["x0_pred"], tar_mel)
-        total_loss += diff_loss_x0
-        train_losses["diff_loss_x0"] = diff_loss_x0
+        # import matplotlib.pyplot as plt
+        # plt.imshow(diff_out["x0_pred"][0,:,:].cpu().detach().numpy())
+        # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/diff_out.png")
+        # plt.imshow(tar_mel[0,:,:].cpu().detach().numpy())
+        # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/tar_mel.png")
+        # assert 0
 
-        diff_loss_noise = diff_loss(diff_out["noise_pred"], diff_out["noise"], mask=mask)
-        total_loss += diff_loss_noise
-        train_losses["diff_loss_noise"] = diff_loss_noise
+        diff_loss_x0_whisper = F.mse_loss(diff_out["x0_pred"], tar_mel)
+        total_loss += diff_loss_x0_whisper
+        train_losses["diff_loss_x0_whisper"] = diff_loss_x0_whisper
+
+        diff_loss_noise_normal = diff_loss(diff_out["noise_pred"], diff_out["noise"], mask=mask)
+        total_loss += diff_loss_noise_normal
+        train_losses["diff_loss_noise"] = diff_loss_noise_normal
+
+        if self.use_normal_as_input:
+            diff_loss_x0_normal = F.mse_loss(diff_out_from_normal["x0_pred"], tar_mel)
+            total_loss += diff_loss_x0_normal
+            train_losses["diff_loss_x0_normal"] = diff_loss_x0_normal
+
+            diff_loss_noise_whisper = diff_loss(diff_out_from_normal["noise_pred"], diff_out_from_normal["noise"], mask=mask)
+            total_loss += diff_loss_noise_whisper
+            train_losses["diff_loss_noise"] = diff_loss_noise_whisper
+        
         train_losses["total_loss"] = total_loss
 
         self.optimizer.zero_grad()

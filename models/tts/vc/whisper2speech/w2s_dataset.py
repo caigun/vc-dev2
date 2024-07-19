@@ -20,7 +20,7 @@ NUM_WORKERS = 64
 lock = Lock()  # 创建一个全局锁
 SAMPLE_RATE = 16000
 lib=ctypes.CDLL("/mntnfs/lee_data1/caijunwang/vc-dev2/models/tts/vc/whisper2speech/toWhisper/libtoWhisper.so")
-def process_audio(normal_path,output_path, work_dir):
+def process_audio(normal_path,output_path):
     input_path = normal_path
     output_file = output_path 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -38,22 +38,22 @@ def process_audio(normal_path,output_path, work_dir):
         print(f"Failed to process {input_path}: {result}")
     else:
         return input_path
-def get_normal_and_whisper(normal_path, temp_path, work_dir):
+def get_normal_and_whisper(normal_path, temp_path):
     # t0 = time.time()
     #filename = "{}.wav".format(normal_path.split(".")[-2])
     filename = os.path.basename(normal_path)
     output_path = os.path.join(temp_path, filename)
-    opath = os.getcwd()
-    os.chdir(work_dir)
+    # opath = os.getcwd()
+    # os.chdir(work_dir)
     #os.system("./toWhisper -o \"{}\" -l 0.6 \"{}\"".format(output_path, normal_path))
     #breakpoint()
-    process_audio(normal_path, output_path, work_dir)
+    process_audio(normal_path, output_path)
     speech, _ = librosa.load(normal_path, sr=SAMPLE_RATE)
     # wspeech, _, _ = s2w(speech, mode='wave', samplerate=SAMPLE_RATE)
     # wspeech = speech.copy()
     wspeech, _ = librosa.load(output_path, sr=SAMPLE_RATE)
     os.remove(output_path)
-    os.chdir(opath)
+    # os.chdir(opath)
     t1 = time.time()
     # print(t1-t0)
     return speech, wspeech
@@ -342,8 +342,8 @@ class VCDataset(Dataset):
     def __getitem__(self, idx):
         file_path = self.filtered_files[idx]
         speech, wspeech = get_normal_and_whisper(file_path,
-                                                 self.temp_file_path,
-                                                 self.toWhisper_path)
+                                                 self.temp_file_path)
+                                                #  self.toWhisper_path)
                                                 #  "/mntnfs/lee_data1/caijunwang/ckpt/temp",
                                                 #  "/mntnfs/lee_data1/caijunwang/lib/toWhisper")
         # import soundfile as sf

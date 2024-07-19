@@ -203,7 +203,8 @@ def main():
         with torch.no_grad():
             ref_mel = mel_spectrogram(ref_audio)
             tgt_mel = mel_spectrogram(tgt_audio)
-            source_mel = mel_spectrogram(audio)
+            source_mel = mel_spectrogram(audio).transpose(1, 2)
+            # source_mask = torch.ones(source_mel.shape[0], source_mel.shape[1]).to(args.local_rank).bool()
             ref_mel = ref_mel.transpose(1, 2).to(device=args.local_rank)
             ref_mask = torch.ones(ref_mel.shape[0], ref_mel.shape[1]).to(args.local_rank).bool()
 
@@ -216,11 +217,16 @@ def main():
 
             _, content_feature = w2v(audio)
             content_feature = content_feature.to(device=args.local_rank)
-
-            pitch_raw = extract_world_f0(audio)
-            pitch = (pitch_raw - pitch_raw.mean(dim=1, keepdim=True)) / (
-                pitch_raw.std(dim=1, keepdim=True) + 1e-6
-            )  
+            if cfg.trans_exp.use_avg_pitch:
+                pitch = extract_world_f0(ref_audio)
+                pitch = pitch.mean(dim=1, keepdim=True)
+                # pitch = (pitch - pitch.mean(dim=1, keepdim=True)) / (pitch.std(dim=1, keepdim=True) + 1e-6) # Normalize pitch (B,T)
+            else:
+                pitch = None 
+            # pitch_raw = extract_world_f0(audio)
+            # pitch = (pitch_raw - pitch_raw.mean(dim=1, keepdim=True)) / (
+            #     pitch_raw.std(dim=1, keepdim=True) + 1e-6
+            # )  
             x0 = model.inference(
                 content_feature=content_feature,
                 pitch=pitch,
@@ -228,6 +234,8 @@ def main():
                 x_ref_mask=ref_mask,
                 inference_steps=200, 
                 sigma=1.2,
+                # x=source_mel,
+                # mask=source_mask
             )# 150-300 0.95-1.5
 
             test_case = dict()
@@ -244,7 +252,7 @@ def main():
             np.save(recon_path, x0.transpose(1, 2).detach().cpu().numpy())
             np.save(prompt_path, ref_mel.transpose(1, 2).detach().cpu().numpy())
             np.save(ref_path, tgt_mel.detach().cpu().numpy())
-            np.save(source_path, source_mel.detach().cpu().numpy())
+            np.save(source_path, source_mel.transpose(1, 2).detach().cpu().numpy())
             test_cases.append(test_case)
     del model, w2v, ref_mel, ref_mask, content_feature, x0, ref_audio, tgt_audio, audio, tgt_mel, source_mel
     data = dict()
