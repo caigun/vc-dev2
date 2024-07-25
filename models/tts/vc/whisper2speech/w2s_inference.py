@@ -14,6 +14,7 @@ from models.tts.vc.whisper2speech.ns2_uniamphion import UniAmphionVC
 from models.tts.vc.whisper_feature import WhisperNormal
 from models.tts.vc.hubert_kmeans import HubertWithKmeans
 from models.tts.vc.vc_utils import mel_spectrogram, extract_world_f0, get_pitch_shifted_speech
+from models.tts.vc.whisper2speech.hubert.w2u import whisper2vector
 
 utteranceid2text = {
     '001': "Please call Stella.",
@@ -101,7 +102,12 @@ def main():
     ckpt_path = args.checkpoint_path
     zero_shot_json_file_path = args.zero_shot_json_file_path
     if args.content_extractor == "mhubert":
-        w2v  = HubertWithKmeans()
+        if cfg.trans_exp.content_extractor == "whubert":
+            w2v = whisper2vector(cfg, args.local_rank)
+        elif cfg.trans_exp.content_extractor == "mhubert":
+            w2v = HubertWithKmeans()
+            w2v = w2v.to(device=args.local_rank)
+            w2v.eval()
     elif args.content_extractor == "whisper":
         print("using whisper")
         w2v = WhisperNormal()
@@ -111,9 +117,11 @@ def main():
     if "whisper" in args.content_extractor:
         cfg.model.vc_feature.content_feature_dim = 512
     else:
-       cfg.model.vc_feature.content_feature_dim = 768
-    w2v = w2v.to(device=args.local_rank)
-    w2v.eval()
+        if cfg.trans_exp.content_extractor == "whubert":
+            cfg.model.vc_feature.content_feature_dim = 256
+        elif cfg.trans_exp.content_extractor == "mhubert":
+            cfg.model.vc_feature.content_feature_dim = 768
+
 
     model = UniAmphionVC(cfg=cfg.model)
     print("loading model")
@@ -171,6 +179,11 @@ def main():
     os.makedirs(f"{args.output_dir}/source/mel", exist_ok=True)
     os.makedirs(f"{args.output_dir}/prompt/mel", exist_ok=True)
 
+    os.makedirs(f"{args.output_dir}/recon/wav", exist_ok=True)
+    os.makedirs(f"{args.output_dir}/target/wav", exist_ok=True)
+    os.makedirs(f"{args.output_dir}/source/wav", exist_ok=True)
+    os.makedirs(f"{args.output_dir}/prompt/wav", exist_ok=True)
+
     temp_id = 0
     all_keys = utt_dict.keys()
     # random sample 20 samples
@@ -201,10 +214,15 @@ def main():
         ref_audio = ref_audio[None, :]
 
         with torch.no_grad():
-            ref_mel = mel_spectrogram(ref_audio)
-            tgt_mel = mel_spectrogram(tgt_audio)
-            source_mel = mel_spectrogram(audio).transpose(1, 2)
-            # source_mask = torch.ones(source_mel.shape[0], source_mel.shape[1]).to(args.local_rank).bool()
+            if cfg.trans_exp.content_extractor == "mhubert":
+                ref_mel = mel_spectrogram(ref_audio)
+                tgt_mel = mel_spectrogram(tgt_audio)
+                source_mel = mel_spectrogram(audio).transpose(1, 2)
+            elif cfg.trans_exp.content_extractor == "whubert":
+                ref_mel = mel_spectrogram(ref_audio, hop_size=320)
+                tgt_mel = mel_spectrogram(tgt_audio, hop_size=320)
+                source_mel = mel_spectrogram(audio, hop_size=320).transpose(1, 2)
+                
             ref_mel = ref_mel.transpose(1, 2).to(device=args.local_rank)
             ref_mask = torch.ones(ref_mel.shape[0], ref_mel.shape[1]).to(args.local_rank).bool()
 
@@ -215,7 +233,11 @@ def main():
             #     print("pitch shifted....")
             #     _, content_feature = w2v(shifted_speech)   
 
-            _, content_feature = w2v(audio)
+            if cfg.trans_exp.content_extractor == 'mhubert':
+                _, content_feature = w2v(audio) # semantic (B, T, 768)
+            elif cfg.trans_exp.content_extractor == 'whubert':
+                content_feature = w2v.forward(audio)
+
             content_feature = content_feature.to(device=args.local_rank)
             if cfg.trans_exp.use_avg_pitch:
                 pitch = extract_world_f0(ref_audio)
@@ -266,29 +288,41 @@ def main():
         json.dump(data, f, indent=4)
     with torch.cuda.device(args.local_rank):
         torch.cuda.empty_cache()
-    print("Generating Reconstructed Wav Files")
-    os.system(
-        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/recon/mel'} --output_dir={f'{args.output_dir}/recon/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
-    )
-    print("Generating Target Wav Files")
-    os.system(
-        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/target/mel'} --output_dir={f'{args.output_dir}/target/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
-    )
-    print("Generating Source Wav Files")
-    os.system(
-        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/source/mel'} --output_dir={f'{args.output_dir}/source/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
-    )
-    print("Generating Prompt Wav Files")
-    os.system(
-        f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/prompt/mel'} --output_dir={f'{args.output_dir}/prompt/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
-    )
+    if cfg.trans_exp.content_extractor == "whubert":
+        os.chdir("/mntnfs/lee_data1/caijunwang/wesper-demo")
+        print("Generating Reconstructed Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/wesper-demo/vocoder.py --input {f'{args.output_dir}/recon/mel'} --output {f'{args.output_dir}/recon/wav'} --hifigan={args.vocoder_path}"
+        )
+        print("Generating Target Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/wesper-demo/vocoder.py --input {f'{args.output_dir}/target/mel'} --output {f'{args.output_dir}/target/wav'} --hifigan={args.vocoder_path}"
+        )
+        print("Generating Source Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/wesper-demo/vocoder.py --input {f'{args.output_dir}/source/mel'} --output {f'{args.output_dir}/source/wav'} --hifigan={args.vocoder_path}"
+        )
+        os.chdir("/mntnfs/lee_data1/caijunwang/vc-dev2")
+    elif cfg.trans_exp.content_extractor == "mhubert":
+        print("Generating Reconstructed Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/recon/mel'} --output_dir={f'{args.output_dir}/recon/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        )
+        print("Generating Target Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/target/mel'} --output_dir={f'{args.output_dir}/target/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        )
+        print("Generating Source Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/source/mel'} --output_dir={f'{args.output_dir}/source/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        )
     with torch.cuda.device(args.local_rank):
         torch.cuda.empty_cache()
 
     # 就已经有了全部的wav文件
-    print("running vc_test.py")
+    # print("running vc_test.py")
     # sim-o
-    os.system(f"python /mntnfs/lee_data1/caijunwang/vc-dev2/models/tts/vc/vc_test.py --wavlm_path={args.wavlm_path} -r={f'{args.output_dir}/prompt/wav'} -d={f'{args.output_dir}/recon/wav'} --gpu {args.cuda_id}")
+    # os.system(f"python /mntnfs/lee_data1/caijunwang/vc-dev2/models/tts/vc/vc_test.py --wavlm_path={args.wavlm_path} -r={f'{args.output_dir}/prompt/wav'} -d={f'{args.output_dir}/recon/wav'} --gpu {args.cuda_id}")
     # wer
     # gt text ASR model text
     # f'{args.output_dir}/recon/wav' 

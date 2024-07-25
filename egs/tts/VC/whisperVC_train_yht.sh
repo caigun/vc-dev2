@@ -4,9 +4,9 @@
 #SBATCH -N 1
 #SBATCH -c 18
 #SBATCH -A T00120230002
-#SBATCH --gres=gpu:3
-#SBATCH --nodelist=pgpu18
-#SBATCH --output /mntnfs/lee_data1/caijunwang/vc-dev2/result_whisper_hubert.out         ## filename of the output
+#SBATCH --gres=gpu:2
+#SBATCH --nodelist=pgpu13
+#SBATCH --output /mntnfs/lee_data1/yhtckpt/result_whisper_hubert.out         ## filename of the output
 
 # Copyright (c) 2023 Amphion.
 #
@@ -36,11 +36,11 @@ python setup.py build_ext --inplace
 cd $work_dir
 
 if [ -z "$exp_config" ]; then
-    exp_config="${exp_dir}"/exp_config_4gpu_whisper.json
+    exp_config="${exp_dir}"/exp_config_4gpu_whisper_yht.json
 fi
 echo "Exprimental Configuration File: $exp_config"
 
-exp_name="w2s_medium_cont"
+exp_name="w2s_with_normal_medium"
 
 if [ -z "$gpu" ]; then
     gpu="0,1,2,3"
@@ -56,6 +56,6 @@ CUDA_VISIBLE_DEVICES=$gpu accelerate launch --main_process_port 28500 \
     --log_level debug \
     --resume \
     --resume_type resume \
-    --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium/checkpoint/final_epoch-0010_step-0259440_loss-20313.045110
+    --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_with_normal_medium/checkpoint/epoch-0007_step-0196000_loss-1.700723
     # --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0/checkpoint/final_epoch-0020_step-0039520_loss-2147.519705
     # --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp/new_mhubert/checkpoint/final_epoch-0007_step-0012509_loss-2331.561784

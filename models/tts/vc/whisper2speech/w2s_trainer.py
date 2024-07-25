@@ -28,13 +28,16 @@ from models.tts.vc.whisper_feature import WhisperNormal
 from models.tts.vc.vc_loss import diff_loss, ConstractiveSpeakerLoss
 from models.tts.vc.vc_utils import mel_spectrogram, extract_world_f0
 
+from models.tts.vc.whisper2speech.hubert.w2u import whisper2vector
+
 
 class WVCTrainer(TTSTrainer):
     def __init__(self, args, cfg):
         self.args = args
         self.cfg = cfg
         cfg.exp_name = args.exp_name
-        self.content_extractor = "mhubert"
+        # configure the content extractor (whubert for whisper hubert, mhubert for pre-trained normal speech hubert)
+        self.content_extractor = cfg.trans_exp.content_extractor
 
         # 初始化加速器，并确保所有进程都已就绪
         self._init_accelerator()
@@ -201,8 +204,13 @@ class WVCTrainer(TTSTrainer):
 
 
     def _build_model(self):
-        w2v  = HubertWithKmeans()
-        self.cfg.model.vc_feature.content_feature_dim = 768
+        if self.content_extractor == "mhubert":
+            w2v = HubertWithKmeans()
+            self.cfg.model.vc_feature.content_feature_dim = 768
+        elif self.content_extractor == "whubert":
+            w2v = whisper2vector(self.cfg, self.accelerator.device)
+            self.cfg.model.vc_feature.content_feature_dim = 256
+        # self.cfg.model.vc_feature.content_feature_dim = 768
         model = UniAmphionVC(cfg=self.cfg.model, use_ref_noise=self.use_ref_noise, use_source_noise=self.use_source_noise, use_avg_pitch=self.use_avg_pitch)
         return model, w2v
 
@@ -317,9 +325,14 @@ class WVCTrainer(TTSTrainer):
         
         with torch.set_grad_enabled(False):
             # 提取需要的特征和光谱图
-            mel = mel_spectrogram(speech).transpose(1, 2)
-            ref_mel = mel_spectrogram(ref_speech).transpose(1, 2)
-            tar_mel = mel_spectrogram(tar_speech).transpose(1, 2)
+            if self.content_extractor == "mhubert":
+                mel = mel_spectrogram(speech).transpose(1, 2)
+                ref_mel = mel_spectrogram(ref_speech).transpose(1, 2)
+                tar_mel = mel_spectrogram(tar_speech).transpose(1, 2)
+            elif self.content_extractor == "whubert":
+                mel = mel_spectrogram(speech, hop_size=320).transpose(1, 2)
+                ref_mel = mel_spectrogram(ref_speech, hop_size=320).transpose(1, 2)
+                tar_mel = mel_spectrogram(tar_speech, hop_size=320).transpose(1, 2)
 
             # import matplotlib.pyplot as plt
             # plt.imshow(tar_mel[0,:,:].cpu().numpy())
@@ -341,42 +354,54 @@ class WVCTrainer(TTSTrainer):
                     # pitch = (pitch - pitch.mean(dim=1, keepdim=True)) / (pitch.std(dim=1, keepdim=True) + 1e-6) # Normalize pitch (B,T)
                 else:
                     pitch = None
-                _, content_feature = self.w2v(speech) # semantic (B, T, 768)
+                if self.content_extractor == 'mhubert':
+                    if self.use_normal_as_input:
+                        _, normal_content_feature = self.w2v(tar_speech)
+                    # print(speech.shape)
+                    _, content_feature = self.w2v(speech) # semantic (B, T, 768)
+                    # print(content_feature.shape)
+                    # assert 0
+                elif self.content_extractor == 'whubert':
+                    if self.use_normal_as_input:
+                        normal_content_feature = self.w2v.forward(tar_speech)
+                    content_feature = self.w2v.forward(speech)
+                    # print(content_feature.shape)
+                    # assert 0
 
-            if self.use_ref_noise:
-                noisy_ref_mel = mel_spectrogram(batch["noisy_ref_speech"]).transpose(1, 2)
+            # if self.use_ref_noise:
+            #     noisy_ref_mel = mel_spectrogram(batch["noisy_ref_speech"]).transpose(1, 2)
                 
-            if self.use_source_noise:
-                combined_speech = torch.cat((speech, batch["noisy_speech"]), dim=0)
-                _, combined_features = self.w2v(combined_speech)
-                content_feature, noisy_content_feature = torch.split(combined_features, speech.shape[0], dim=0)
-                combined_pitch = extract_world_f0(combined_speech)
-                clean_pitch, noisy_pitch = torch.split(combined_pitch, speech.shape[0], dim=0)
-                pitch = (clean_pitch - clean_pitch.mean(dim=1, keepdim=True)) / (clean_pitch.std(dim=1, keepdim=True) + 1e-6)
-                noisy_pitch = (noisy_pitch - noisy_pitch.mean(dim=1, keepdim=True)) / (noisy_pitch.std(dim=1, keepdim=True) + 1e-6)
+            # if self.use_source_noise:
+            #     combined_speech = torch.cat((speech, batch["noisy_speech"]), dim=0)
+            #     _, combined_features = self.w2v(combined_speech)
+            #     content_feature, noisy_content_feature = torch.split(combined_features, speech.shape[0], dim=0)
+            #     combined_pitch = extract_world_f0(combined_speech)
+            #     clean_pitch, noisy_pitch = torch.split(combined_pitch, speech.shape[0], dim=0)
+            #     pitch = (clean_pitch - clean_pitch.mean(dim=1, keepdim=True)) / (clean_pitch.std(dim=1, keepdim=True) + 1e-6)
+            #     noisy_pitch = (noisy_pitch - noisy_pitch.mean(dim=1, keepdim=True)) / (noisy_pitch.std(dim=1, keepdim=True) + 1e-6)
         
         # FORWARD 模型
-        if self.use_ref_noise and self.use_source_noise:
-            diff_out, (ref_emb, noisy_ref_emb), (cond_emb, noisy_cond_emb) = self.model(
-                x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
-                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
-                noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
-            )
-        elif self.use_ref_noise:
-            diff_out, (ref_emb, noisy_ref_emb), (cond_emb, _) = self.model(
-                x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
-                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
-            )
-        else:
-            diff_out, (ref_emb, _), (cond_emb, _) = self.model(
-                x=mel, content_feature=content_feature, pitch=None, x_ref=ref_mel,
+        # if self.use_ref_noise and self.use_source_noise:
+        #     diff_out, (ref_emb, noisy_ref_emb), (cond_emb, noisy_cond_emb) = self.model(
+        #         x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+        #         x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
+        #         noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
+        #     )
+        # elif self.use_ref_noise:
+        #     diff_out, (ref_emb, noisy_ref_emb), (cond_emb, _) = self.model(
+        #         x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+        #         x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
+        #     )
+        # else:
+        diff_out, (ref_emb, _), (cond_emb, _) = self.model(
+            x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+            x_mask=mask, x_ref_mask=ref_mask
+        )
+        if self.use_normal_as_input:
+            diff_out_from_normal, (ref_emb, _), (cond_emb, _) = self.model(
+                x=tar_mel, content_feature=normal_content_feature, pitch=pitch, x_ref=ref_mel,
                 x_mask=mask, x_ref_mask=ref_mask
             )
-            if self.use_normal_as_input:
-                diff_out_from_normal, (ref_emb, _), (cond_emb, _) = self.model(
-                    x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
-                    x_mask=mask, x_ref_mask=ref_mask
-                )
 
         # if self.use_ref_noise:
         #     # B x N_query x D 
@@ -411,7 +436,8 @@ class WVCTrainer(TTSTrainer):
         # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/tar_mel.png")
         # assert 0
 
-        diff_loss_x0_whisper = F.mse_loss(diff_out["x0_pred"], tar_mel)
+        # diff_loss_x0_whisper = F.mse_loss(diff_out["x0_pred"], tar_mel)
+        diff_loss_x0_whisper = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
         total_loss += diff_loss_x0_whisper
         train_losses["diff_loss_x0_whisper"] = diff_loss_x0_whisper
 
@@ -420,7 +446,8 @@ class WVCTrainer(TTSTrainer):
         train_losses["diff_loss_noise"] = diff_loss_noise_normal
 
         if self.use_normal_as_input:
-            diff_loss_x0_normal = F.mse_loss(diff_out_from_normal["x0_pred"], tar_mel)
+            # diff_loss_x0_normal = F.mse_loss(diff_out_from_normal["x0_pred"], tar_mel)
+            diff_loss_x0_normal = diff_loss(diff_out_from_normal["x0_pred"], tar_mel, mask=mask)
             total_loss += diff_loss_x0_normal
             train_losses["diff_loss_x0_normal"] = diff_loss_x0_normal
 
@@ -456,11 +483,12 @@ class WVCTrainer(TTSTrainer):
                 self.model[key].train()
         else:
             self.model.train()
-        if isinstance(self.w2v, dict):
-            for key in self.w2v.keys():
-                self.w2v[key].eval()
-        else:
-            self.w2v.eval()
+        if self.content_extractor == 'mhubert':
+            if isinstance(self.w2v, dict):
+                for key in self.w2v.keys():
+                    self.w2v[key].eval()
+            else:
+                self.w2v.eval()
 
         epoch_sum_loss: float = 0.0 # total loss
         # Put the data to cuda device
@@ -468,7 +496,8 @@ class WVCTrainer(TTSTrainer):
         with device:
             torch.cuda.empty_cache()
         self.model = self.model.to(device)
-        self.w2v = self.w2v.to(device)
+        if self.content_extractor == 'mhubert':
+            self.w2v = self.w2v.to(device)
 
         for batch in tqdm(
             self.train_dataloader,

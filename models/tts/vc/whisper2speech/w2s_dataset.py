@@ -39,23 +39,12 @@ def process_audio(normal_path,output_path):
     else:
         return input_path
 def get_normal_and_whisper(normal_path, temp_path):
-    # t0 = time.time()
-    #filename = "{}.wav".format(normal_path.split(".")[-2])
     filename = os.path.basename(normal_path)
     output_path = os.path.join(temp_path, filename)
-    # opath = os.getcwd()
-    # os.chdir(work_dir)
-    #os.system("./toWhisper -o \"{}\" -l 0.6 \"{}\"".format(output_path, normal_path))
-    #breakpoint()
     process_audio(normal_path, output_path)
     speech, _ = librosa.load(normal_path, sr=SAMPLE_RATE)
-    # wspeech, _, _ = s2w(speech, mode='wave', samplerate=SAMPLE_RATE)
-    # wspeech = speech.copy()
     wspeech, _ = librosa.load(output_path, sr=SAMPLE_RATE)
     os.remove(output_path)
-    # os.chdir(opath)
-    t1 = time.time()
-    # print(t1-t0)
     return speech, wspeech
 
 def get_metadata(file_path):
@@ -91,6 +80,7 @@ class VCDataset(Dataset):
 
         self.toWhisper_path = args.toWhisper_path
         self.temp_file_path = args.temp_file_path
+        self.content_extractor = args.content_extractor
 
         # 配置噪声和说话人使用
         self.use_source_noise = args.use_source_noise
@@ -168,11 +158,6 @@ class VCDataset(Dataset):
         )
         del self.meta_data_cache, self.speaker_cache
 
-        # if self.use_ref_noise or self.use_source_noise:
-        #     if TRAIN_MODE:
-        #         self.noise_filenames = self.get_all_flac(args.noise_dir)
-        #     else:
-        #         self.noise_filenames = self.get_all_flac(args.test_noise_dir)
 
     def process_files(self):
         print(f"Processing metadata...")
@@ -207,26 +192,6 @@ class VCDataset(Dataset):
                 if file.endswith(".flac") or file.endswith(".wav"):
                     flac_files.append(os.path.join(root, file))
         return flac_files
-
-    # def get_flac_files(self, normal_directory, whispered_directory): # this is for prepared aligned normal speecha and whispered speech
-    #     flac_files = []
-        
-    #     # Walk through the normal speech directory
-    #     for root, dirs, files in os.walk(normal_directory):
-    #         for file in files:
-    #             if file.endswith(".wav"):
-    #                 # Get the relative path of the normal speech file
-    #                 relative_path = os.path.relpath(os.path.join(root, file), normal_directory)
-                    
-    #                 # Corresponding whispered speech file path
-    #                 whispered_path = os.path.join(whispered_directory, relative_path.replace(".wav", "_whisper.wav"))
-                    
-    #                 # Check if the whispered file exists
-    #                 assert os.path.exists(whispered_path), f"Whispered speech file not found: {whispered_path}"
-                    
-    #                 flac_files.append((os.path.join(root, file), whispered_path))
-        
-    #     return flac_files
 
     def get_all_flac(self, directory):
         directories = [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
@@ -355,7 +320,11 @@ class VCDataset(Dataset):
         wspeech = torch.tensor(wspeech, dtype=torch.float32)
         speech = torch.tensor(speech, dtype=torch.float32)
         # inputs = torch.tensor(wspeech, dtype=torch.float32)
-        inputs = self._get_reference_vc(wspeech, speech, hop_length=200)
+        if self.content_extractor == "whubert":
+            hop_length=320
+        elif self.content_extractor == "whubert":
+            hop_length=200
+        inputs = self._get_reference_vc(wspeech, speech, hop_length=hop_length)
         speaker = self.index2speaker[idx]
         speaker_id = self.speaker2id[speaker]
         inputs["speaker_id"] = speaker_id
@@ -380,20 +349,6 @@ class VCDataset(Dataset):
         mask = torch.ones(len(new_speech) // hop_length)
 
         return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
-    
-        # elif self.use_source_noise and self.use_ref_noise:
-        #     # 使用噪声
-        #     noisy_ref_speech = self.add_noise(ref_speech) # 添加噪声
-        #     nosiy_speech = self.add_noise(new_speech) # 添加噪声
-        #     return {"speech": new_speech, "noisy_speech":nosiy_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask}
-        # elif self.use_source_noise and not self.use_ref_noise:
-        #     # 只使用源噪声
-        #     noisy_speech = self.add_noise(new_speech)
-        #     return {"speech": new_speech, "noisy_speech": noisy_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask}
-        # elif self.use_ref_noise and not self.use_source_noise:
-        #     # 只使用参考噪声
-        #     noisy_ref_speech = self.add_noise(ref_speech)
-        #     return {"speech": new_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask}
         
 class VCCollator(BaseCollator):
     def __init__(self, cfg):
@@ -440,14 +395,6 @@ class VCCollator(BaseCollator):
         # Process 'speaker_id' data
         speaker_ids = [process_tensor(b['speaker_id'], dtype=torch.int64) for b in batch]
         packed_batch_features['speaker_id'] = torch.stack(speaker_ids, dim=0)
-        if self.use_source_noise:
-            # Process 'noisy_speech' data
-            noisy_speeches = [process_tensor(b['noisy_speech']) for b in batch]
-            packed_batch_features['noisy_speech'] = pad_sequence(noisy_speeches, batch_first=True, padding_value=0)
-        if self.use_ref_noise:
-            # Process 'noisy_ref_speech' data
-            noisy_ref_speeches = [process_tensor(b['noisy_ref_speech']) for b in batch]
-            packed_batch_features['noisy_ref_speech'] = pad_sequence(noisy_ref_speeches, batch_first=True, padding_value=0)
         return packed_batch_features
 
 
