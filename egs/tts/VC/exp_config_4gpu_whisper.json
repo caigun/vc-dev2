@@ -17,9 +17,9 @@
         // New trainer and Accelerator
         "gradient_accumulation_step": 1,
         "tracker": ["tensorboard"],
-        "max_epoch": 20,
+        "max_epoch": 10,
         "save_checkpoint_stride": [5000],
-        "keep_last": [5],
+        "keep_last": [2],
         "run_eval": [true],
         "dataloader": {
           "num_worker": 64,
@@ -50,7 +50,7 @@
     "snr_lower": 2,
     "snr_upper": 42,
     "total_snrlevels": 5, 
-    "noise_dir": "/mntnfs/lee_data1/caijunwang/vc-dev2/MS-SNSD/noise_train",
+    "noise_dir": "/mntnfs/lee_data1/caijunwang/resources/noise",
     "test_noise_dir": "/mntnfs/lee_data1/caijunwang/vc-dev2/MS-SNSD/noise_test",
     "toWhisper_path": "/mntnfs/lee_data1/caijunwang/lib/toWhisper",
     "temp_file_path": "/mntnfs/lee_data1/caijunwang/ckpt/temp",

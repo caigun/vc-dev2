@@ -1282,9 +1282,13 @@ class UniAmphionVC(nn.Module):
             
         if self.use_source_noise:
             # condition_embedding
-            noisy_condition_embedding = torch.cat([noisy_content_feature, noisy_pitch[:, :, None]], dim=-1)
-            noisy_condition_embedding = self.content_f0_enc(noisy_condition_embedding)
-            combined_condition_embedding = (noisy_condition_embedding + condition_embedding) / 2
+            if noisy_pitch is not None:
+                noisy_condition_embedding = torch.cat([noisy_content_feature, noisy_pitch[:, :, None]], dim=-1)
+                noisy_condition_embedding = self.content_f0_enc(noisy_condition_embedding)
+                combined_condition_embedding = (noisy_condition_embedding + condition_embedding) / 2
+            else:
+                noisy_condition_embedding = self.content_f0_enc(noisy_content_feature.clone())
+                combined_condition_embedding = (noisy_condition_embedding + condition_embedding) / 2
         else:
             combined_condition_embedding = condition_embedding
           

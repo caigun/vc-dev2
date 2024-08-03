@@ -1,23 +1,21 @@
 import argparse
 import torch
 import numpy as np
-import torch
 from tqdm import tqdm
 from safetensors.torch import load_model
 import librosa
 from utils.util import load_config
 import os
-import json
-from utils.util import load_config
 from models.tts.vc.whisper2speech.ns2_uniamphion import UniAmphionVC
 from models.tts.vc.whisper_feature import WhisperNormal
 from models.tts.vc.hubert_kmeans import HubertWithKmeans
 from models.tts.vc.vc_utils import mel_spectrogram, extract_world_f0, get_pitch_shifted_speech
 from models.tts.vc.whisper2speech.w2s_dataset import get_normal_and_whisper
 from models.tts.vc.whisper2speech.hubert.w2u import whisper2vector
+from evaluation.metrics.similarity.speaker_similarity import extract_speaker_similarity
 
 def w2v_process(normal_path, ref_path, args, cfg, model, w2v, id, transcript_path):
-    tgt_wav, wav = get_normal_and_whisper(normal_path, temp_path="/mntnfs/lee_data1/caijunwang/ckpt/temp")
+    tgt_wav, wav = get_normal_and_whisper(normal_path, temp_path="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/temp")
     ref_wav, _ = librosa.load(ref_path, sr=16000)
 
     wav = np.pad(wav, (0, 1600 - len(wav) % 1600))
@@ -47,8 +45,10 @@ def w2v_process(normal_path, ref_path, args, cfg, model, w2v, id, transcript_pat
 
         if cfg.trans_exp.content_extractor == 'mhubert':
             _, content_feature = w2v(audio) # semantic (B, T, 768)
+            _, content_feature_normal = w2v(tgt_wav)
         elif cfg.trans_exp.content_extractor == 'whubert':
             content_feature = w2v.forward(audio)
+            content_feature_normal = w2v.forward(tgt_wav)
 
         content_feature = content_feature.to(device=args.local_rank)
 
@@ -63,17 +63,28 @@ def w2v_process(normal_path, ref_path, args, cfg, model, w2v, id, transcript_pat
             pitch=pitch,
             x_ref=ref_mel,
             x_ref_mask=ref_mask,
-            inference_steps=200, 
+            inference_steps=1000, 
+            sigma=1.2,
+        )
+
+        x0_n2n = model.inference(
+            content_feature=content_feature_normal,
+            pitch=pitch,
+            x_ref=ref_mel,
+            x_ref_mask=ref_mask,
+            inference_steps=1000, 
             sigma=1.2,
         )
 
         recon_path = f"{args.output_dir}/recon/mel/{id}.npy"
         ref_path = f"{args.output_dir}/target/mel/{id}.npy"
         source_path = f"{args.output_dir}/source/mel/{id}.npy"
+        n2n_path = f"{args.output_dir}/n2n/mel/{id}.npy"
     
         np.save(recon_path, x0.transpose(1, 2).detach().cpu().numpy())
         np.save(ref_path, tgt_mel.detach().cpu().numpy())
         np.save(source_path, source_mel.transpose(1, 2).detach().cpu().numpy())
+        np.save(n2n_path, x0_n2n.transpose(1, 2).detach().cpu().numpy())
 
         with open(transcript_path, 'r') as file:
             transcript = file.readline().strip()
@@ -190,10 +201,12 @@ def main():
     os.makedirs(f"{args.output_dir}/recon/mel", exist_ok=True)
     os.makedirs(f"{args.output_dir}/target/mel", exist_ok=True)
     os.makedirs(f"{args.output_dir}/source/mel", exist_ok=True)
+    os.makedirs(f"{args.output_dir}/n2n/mel", exist_ok=True)
 
     os.makedirs(f"{args.output_dir}/recon/wav", exist_ok=True)
     os.makedirs(f"{args.output_dir}/target/wav", exist_ok=True)
     os.makedirs(f"{args.output_dir}/source/wav", exist_ok=True)
+    os.makedirs(f"{args.output_dir}/n2n/wav", exist_ok=True)
 
     total_files = 0
     for root, dirs, files in os.walk(args.dataset_path):
@@ -204,9 +217,10 @@ def main():
             if len(wav_files) > 1:  # Ensure there is more than one file to use the first as a reference
                 total_files += len(wav_files) - 1
 
-    test_quantity = min(100, total_files)
+    test_quantity = min(np.inf, total_files)
     processed_files = tqdm(total=test_quantity)
     file_id = 1  # Initialize file identifier
+    strike = 10
 
     for root, dirs, files in os.walk(args.dataset_path):
         parts = root.count(os.sep)
@@ -217,13 +231,19 @@ def main():
                 nfile = 0
                 for audio_file in wav_files[1:]:
                     audio_path = os.path.join(root, audio_file)
+                    audio, sr =  librosa.load(audio_path)
+                    audio_length = len(audio)/sr
+                    processed_files.update(1)
+                    if audio_length < 8:
+                        continue
+                    # if audio_length < 3 or audio_length >= 8:
+                    #     continue
                     transcript_path = audio_path.replace(".wav", ".original.txt")
                     w2v_process(normal_path=audio_path, ref_path=reference_audio, args=args, cfg=cfg, model=model, w2v=w2v, id=str(file_id), transcript_path=transcript_path)
-                    processed_files.update(1)  # Update the progress bar for each processed file
                     file_id += 1
                     nfile += 1
 
-                    if file_id == test_quantity+1 or nfile == 6:
+                    if file_id == test_quantity+1 or nfile == strike+1:
                         break
                 if file_id == test_quantity+1:
                     break
@@ -248,6 +268,10 @@ def main():
         os.system(
             f"python /mntnfs/lee_data1/caijunwang/wesper-demo/vocoder.py --input {f'{args.output_dir}/source/mel'} --output {f'{args.output_dir}/source/wav'} --hifigan={args.vocoder_path}"
         )
+        print("Generating n2n Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/wesper-demo/vocoder.py --input {f'{args.output_dir}/n2n/mel'} --output {f'{args.output_dir}/n2n/wav'} --hifigan={args.vocoder_path}"
+        )
         os.chdir("/mntnfs/lee_data1/caijunwang/vc-dev2")
     elif cfg.trans_exp.content_extractor == "mhubert":
         print("Generating Reconstructed Wav Files")
@@ -262,9 +286,22 @@ def main():
         os.system(
             f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/source/mel'} --output_dir={f'{args.output_dir}/source/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
         )
+        print("Generating n2n Wav Files")
+        os.system(
+            f"python /mntnfs/lee_data1/caijunwang/vc-dev2/BigVGAN/inference_e2e.py --input_mels_dir={f'{args.output_dir}/n2n/mel'} --output_dir={f'{args.output_dir}/n2n/wav'} --checkpoint_file={args.vocoder_path} --gpu {args.cuda_id}"
+        )
 
     with torch.cuda.device(args.local_rank):
         torch.cuda.empty_cache()
+
+    speaker_similarity = extract_speaker_similarity(f'{args.output_dir}/recon/wav', f'{args.output_dir}/target/wav')
+    speaker_similarity_n2n = extract_speaker_similarity(f'{args.output_dir}/n2n/wav', f'{args.output_dir}/target/wav')
+    speaker_similarity_gt = extract_speaker_similarity(f'{args.output_dir}/target/wav', f'{args.output_dir}/target/wav')
+    speaker_similarity_source = extract_speaker_similarity(f'{args.output_dir}/source/wav', f'{args.output_dir}/target/wav')
+    print(f"Speaker_similarity: {speaker_similarity}")
+    print(f"Speaker_similarity_n2n: {speaker_similarity_n2n}")
+    print(f"Speaker_similarity_gt: {speaker_similarity_gt}")
+    print(f"Speaker_similarity_source: {speaker_similarity_source}")
 
     subject = "wer"
     # --ltr_path {args.output_dir}/transcript.txt
@@ -277,6 +314,9 @@ def main():
     )
     os.system(
         f"sh egs/metrics/run.sh --reference_folder {args.output_dir}/target/wav --generated_folder {args.output_dir}/target/wav --dump_folder /mntnfs/lee_data1/caijunwang/evaluation_results --metrics \"{subject}\" --fs 16000 --wer_choose 2 --ltr_path {args.output_dir}/transcript.txt --language english --name gt"
+    )
+    os.system(
+        f"sh egs/metrics/run.sh --reference_folder {args.output_dir}/target/wav --generated_folder {args.output_dir}/n2n/wav --dump_folder /mntnfs/lee_data1/caijunwang/evaluation_results --metrics \"{subject}\" --fs 16000 --wer_choose 2 --ltr_path {args.output_dir}/transcript.txt --language english --name n2n"
     )
 
 

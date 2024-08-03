@@ -13,8 +13,8 @@ def extract_wer(
     audio_ref=None,
     audio_deg=None,
     fs=None,
-    language="chinese",
-    remove_space=True,
+    language="english",
+    remove_space=False,
     remove_punctuation=True,
     mode="gt_audio",
     model=None,
@@ -60,7 +60,10 @@ def extract_wer(
             content_gt = content_gt.replace("-", "")
             content_gt = content_gt.replace(",", "")
             content_gt = content_gt.replace("!", "")
-            content_gt = content_gt.lower()
+            content_gt = content_gt.replace("?", "")
+            content_gt = content_gt.replace(":", "")
+            content_gt = content_pred.replace("\"", "")
+            content_gt = content_gt.lower().strip()
 
     # Get predicted content
     content_pred = result_deg["text"]
@@ -72,7 +75,11 @@ def extract_wer(
         content_pred = content_pred.replace("-", "")
         content_pred = content_pred.replace(",", "")
         content_pred = content_pred.replace("!", "")
-        content_pred = content_pred.lower()
+        content_pred = content_pred.replace("?", "")
+        content_pred = content_pred.replace(":", "")
+        content_pred = content_pred.replace("\"", "")
+        content_pred = content_pred.lower().strip()
     wer = WordErrorRate()
+    print(f"GT  :{content_gt}\nPRED:{content_pred}")
 
     return wer(content_pred, content_gt).numpy().tolist()

@@ -1,3 +1,13 @@
+#!/bin/bash
+#SBATCH -J test
+#SBATCH -p p-A800
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -c 6
+#SBATCH -A T00120230002
+#SBATCH --gres=gpu:1
+#SBATCH --output /mntnfs/lee_data1/caijunwang/vc-dev2/infer.out
+
 # Copyright (c) 2023 Amphion.
 #
 # This source code is licensed under the MIT license found in the
@@ -39,19 +49,17 @@ fi
 echo "Exprimental Configuration File: $exp_config"
 
 
-mhubert_whisper_medium="/mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium/checkpoint/final_epoch-0010_step-0259440_loss-20313.045110/pytorch_model.bin"
+mhubert_whisper_medium="/mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium_noise/checkpoint/final_epoch-0020_step-0540384_loss-71958.440633/pytorch_model.bin"
 checkpoint_path=$mhubert_whisper_medium
 
 cuda_id=0
 
 #prompt就是reference， target就是ground truth
-output_dir="/mntnfs/lee_data1/vcdata/ckpt/eval_libritts"
+output_dir="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/out/long_1000"
 # vocoder_path="/mntnfs/lee_data1/vcdata/g_00490000"
 vocoder_path="/mntnfs/lee_data1/caijunwang/resources/g_00205000" #hubert from Wesper
 wavlm_path="/mntnfs/lee_data1/vcdata/wavlm-base-plus-sv"
-dataset_path="/mntcephfs/data/wuzhizheng/LibriTTS/test-clean"
-#加一个ASR模型的path
-#用来算WER
+dataset_path="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/test-clean"
 
 
 echo "CUDA ID: $cuda_id"
@@ -72,3 +80,7 @@ python "${work_dir}"/models/tts/vc/whisper2speech/w2s_evaluation.py \
     --input_type normal\
     --wavlm_path $wavlm_path
 
+echo "python convert.py --input ${output_dir}/source/wav --output ${output_dir}/wesper_recon/wav --hubert /mntnfs/lee_data1/caijunwang/resources/model-layer12-450000.pt --fastspeech2 /mntnfs/lee_data1/caijunwang/resources/googletts_neutral_best.tar --hifigan $vocoder_path"
+echo "sh egs/metrics/run.sh --reference_folder ${output_dir}/target/wav --generated_folder ${output_dir}/wesper_recon/wav --dump_folder /mntnfs/lee_data1/caijunwang/evaluation_results --metrics "wer" --fs 16000 --wer_choose 2 --ltr_path ${output_dir}/transcript.txt --language english --name wesper"
+echo "from evaluation.metrics.similarity.speaker_similarity import extract_speaker_similarity"
+echo "extract_speaker_similarity(\"${output_dir}/target/wav\", \"${output_dir}/wesper_recon/wav\")"

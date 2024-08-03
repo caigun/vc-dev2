@@ -13,7 +13,7 @@ def extract_cer(
     audio_ref=None,
     audio_deg=None,
     fs=None,
-    language="chinese",
+    language="english",
     remove_space=True,
     remove_punctuation=True,
     mode="gt_audio",

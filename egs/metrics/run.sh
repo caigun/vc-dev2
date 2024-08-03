@@ -12,7 +12,7 @@ export PYTHONPATH=$work_dir
 export PYTHONIOENCODING=UTF-8
 
 ######## Parse the Given Parameters from the Commond ###########
-options=$(getopt -o c:n:s --long gpu:,reference_folder:,generated_folder:,dump_folder:,metrics:,fs: -- "$@")
+options=$(getopt -o c:n:s --long gpu:,reference_folder:,generated_folder:,dump_folder:,metrics:,fs:,wer_choose:,ltr_path:,language:,name: -- "$@")
 eval set -- "$options"
 
 gpu=$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits | awk '$2 > 1000 {print $1}' | head -n 1)
@@ -35,6 +35,11 @@ while true; do
     # Sampling Rate
     --fs) shift; fs=$1 ; shift ;;
 
+    --wer_choose) shift; wer_choose=$1 ; shift ;;
+    --ltr_path) shift; ltr_path=$1 ; shift ;;
+    --language) shift; language=$1 ; shift ;;
+    --name) shift; name=$1 ; shift ;;
+
     --) shift ; break ;;
     *) echo "Invalid option: $1" exit 1 ;;
   esac
@@ -47,3 +52,7 @@ CUDA_VISIBLE_DEVICES=$gpu python "$work_dir"/bins/calc_metrics.py \
     --dump_dir $dump_dir \
     --metrics $metrics \
     --fs $fs \
+    --wer_choose $wer_choose\
+    --ltr_path $ltr_path\
+    --language $language\
+    --name $name

@@ -62,6 +62,9 @@ class HubertWithKmeans(nn.Module):
         kmeans_path = '/mntnfs/lee_data1/vcdata/mhubert/mhubert_base_vp_en_es_fr_it3_L11_km1000.bin',
         # checkpoint_path = '/mntnfs/lee_data1/caijunwang/fairseq/None/checkpoints/checkpoint_95_400000.pt',
         # kmeans_path = '/mntnfs/lee_data1/caijunwang/lib/hubert/result/kmeans_train.pkl',
+        # checkpoint_path = "/mntcephfs/data/wuzhizheng/lyy/ckpt/run/checkpoints/checkpoint_best.pt",
+        # checkpoint_path = "/mntcephfs/lab_data/lijiaqi/vcdata/hubert/None/checkpoints/checkpoint_52_50000.pt",
+        # kmeans_path = "/mntcephfs/data/wuzhizheng/librispeech/hubert/feature/kmeans_train.pkl",
         target_sample_hz=16000,
         seq_len_multiple_of=None,
         output_layer=9,
@@ -118,6 +121,7 @@ class HubertWithKmeans(nn.Module):
 
         if exists(self.seq_len_multiple_of):
             wav_input = curtail_to_multiple(wav_input, self.seq_len_multiple_of)
+        # print(wav_input.shape)
 
         embed = self.model(
             wav_input,
@@ -126,10 +130,14 @@ class HubertWithKmeans(nn.Module):
             output_layer=self.output_layer,
         )["x"]
 
+        # return None, embed
+        # print(embed.shape)
+
         embed = embed.permute((0, 2, 1))
         embed = F.interpolate(embed, scale_factor=8, mode="nearest")
         embed = F.interpolate(embed, scale_factor=0.2, mode="nearest")
         embed = embed.permute((0, 2, 1))
+        return None, embed
 
         batched_cluster_centers = repeat(
             self.cluster_centers, "c d -> b c d", b=embed.shape[0]
@@ -137,6 +145,9 @@ class HubertWithKmeans(nn.Module):
         dists = -torch.cdist(embed, batched_cluster_centers, p=2)
         clusters = dists.argmax(dim=-1) # (batch, seq_len)
         quantize = F.embedding(clusters, self.cluster_centers)
+
+        print(quantize.shape)
+        assert 0
 
         if flatten:
             return clusters, quantize

@@ -158,7 +158,12 @@ class VCDataset(Dataset):
         )
         del self.meta_data_cache, self.speaker_cache
 
-
+        if self.use_ref_noise or self.use_source_noise:
+            if TRAIN_MODE:
+                self.noise_filenames = self.get_all_flac(args.noise_dir)
+            else:
+                self.noise_filenames = self.get_all_flac(args.test_noise_dir)
+                
     def process_files(self):
         print(f"Processing metadata...")
         files_to_process = [file for file in self.files if file not in self.metadata_cache]
@@ -322,7 +327,7 @@ class VCDataset(Dataset):
         # inputs = torch.tensor(wspeech, dtype=torch.float32)
         if self.content_extractor == "whubert":
             hop_length=320
-        elif self.content_extractor == "whubert":
+        elif self.content_extractor == "mhubert":
             hop_length=200
         inputs = self._get_reference_vc(wspeech, speech, hop_length=hop_length)
         speaker = self.index2speaker[idx]
@@ -348,7 +353,22 @@ class VCDataset(Dataset):
         ref_mask = torch.ones(len(ref_speech) // hop_length)
         mask = torch.ones(len(new_speech) // hop_length)
 
-        return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+        if not (self.use_source_noise or self.use_ref_noise):
+            # 不使用噪声
+            return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+        elif self.use_source_noise and self.use_ref_noise:
+            # 使用噪声
+            noisy_ref_speech = self.add_noise(ref_speech) # 添加噪声
+            nosiy_speech = self.add_noise(new_speech) # 添加噪声
+            return {"speech": new_speech, "noisy_speech":nosiy_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+        elif self.use_source_noise and not self.use_ref_noise:
+            # 只使用源噪声
+            noisy_speech = self.add_noise(new_speech)
+            return {"speech": new_speech, "noisy_speech": noisy_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+        elif self.use_ref_noise and not self.use_source_noise:
+            # 只使用参考噪声
+            noisy_ref_speech = self.add_noise(ref_speech)
+            return {"speech": new_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
         
 class VCCollator(BaseCollator):
     def __init__(self, cfg):
@@ -395,6 +415,16 @@ class VCCollator(BaseCollator):
         # Process 'speaker_id' data
         speaker_ids = [process_tensor(b['speaker_id'], dtype=torch.int64) for b in batch]
         packed_batch_features['speaker_id'] = torch.stack(speaker_ids, dim=0)
+        
+        if self.use_source_noise:
+            # Process 'noisy_speech' data
+            noisy_speeches = [process_tensor(b['noisy_speech']) for b in batch]
+            packed_batch_features['noisy_speech'] = pad_sequence(noisy_speeches, batch_first=True, padding_value=0)
+        if self.use_ref_noise:
+            # Process 'noisy_ref_speech' data
+            noisy_ref_speeches = [process_tensor(b['noisy_ref_speech']) for b in batch]
+            packed_batch_features['noisy_ref_speech'] = pad_sequence(noisy_ref_speeches, batch_first=True, padding_value=0)
+        
         return packed_batch_features
 
 

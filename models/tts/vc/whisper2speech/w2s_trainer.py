@@ -334,26 +334,16 @@ class WVCTrainer(TTSTrainer):
                 ref_mel = mel_spectrogram(ref_speech, hop_size=320).transpose(1, 2)
                 tar_mel = mel_spectrogram(tar_speech, hop_size=320).transpose(1, 2)
 
-            # import matplotlib.pyplot as plt
-            # plt.imshow(tar_mel[0,:,:].cpu().numpy())
-            # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/tar_mel.png")
-            # plt.imshow(mel[0,:,:].cpu().numpy())
-            # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/mel.png")
-            # plt.imshow(ref_mel[0,:,:].cpu().numpy())
-            # plt.savefig("/mntnfs/lee_data1/caijunwang/resources/ref_mel.png")
-            # assert 0
-
             mask = batch["mask"]
             ref_mask = batch["ref_mask"]
+
+            if self.use_avg_pitch:
+                raise NotImplementedError
+            else:
+                pitch = None
             
             # 提取 pitch 和 content_feature
             if not self.use_source_noise:
-                if self.use_avg_pitch:
-                    pitch = extract_world_f0(ref_speech)
-                    pitch = pitch.mean(dim=1, keepdim=True)
-                    # pitch = (pitch - pitch.mean(dim=1, keepdim=True)) / (pitch.std(dim=1, keepdim=True) + 1e-6) # Normalize pitch (B,T)
-                else:
-                    pitch = None
                 if self.content_extractor == 'mhubert':
                     if self.use_normal_as_input:
                         _, normal_content_feature = self.w2v(tar_speech)
@@ -368,56 +358,95 @@ class WVCTrainer(TTSTrainer):
                     # print(content_feature.shape)
                     # assert 0
 
-            # if self.use_ref_noise:
-            #     noisy_ref_mel = mel_spectrogram(batch["noisy_ref_speech"]).transpose(1, 2)
+            if self.use_ref_noise:
+                if self.content_extractor == "mhubert":
+                    noisy_ref_mel = mel_spectrogram(batch["noisy_ref_speech"]).transpose(1, 2)
+                elif self.content_extractor == "whubert":
+                    noisy_ref_mel = mel_spectrogram(batch["noisy_ref_speech"], hop_size=320).transpose(1, 2)
                 
-            # if self.use_source_noise:
-            #     combined_speech = torch.cat((speech, batch["noisy_speech"]), dim=0)
-            #     _, combined_features = self.w2v(combined_speech)
-            #     content_feature, noisy_content_feature = torch.split(combined_features, speech.shape[0], dim=0)
-            #     combined_pitch = extract_world_f0(combined_speech)
-            #     clean_pitch, noisy_pitch = torch.split(combined_pitch, speech.shape[0], dim=0)
-            #     pitch = (clean_pitch - clean_pitch.mean(dim=1, keepdim=True)) / (clean_pitch.std(dim=1, keepdim=True) + 1e-6)
-            #     noisy_pitch = (noisy_pitch - noisy_pitch.mean(dim=1, keepdim=True)) / (noisy_pitch.std(dim=1, keepdim=True) + 1e-6)
+            if self.use_source_noise:
+                combined_speech = torch.cat((speech, batch["noisy_speech"]), dim=0)
+                if self.content_extractor == "mhubert":
+                    _, combined_features = self.w2v(combined_speech)
+                    if self.use_normal_as_input:
+                        _, normal_content_feature = self.w2v(tar_speech)
+                elif self.content_extractor == "whubert":
+                    combined_features = self.w2v.forward(combined_speech)
+                    if self.use_normal_as_input:
+                        normal_content_feature = self.w2v.forward(tar_speech)
+                content_feature, noisy_content_feature = torch.split(combined_features, speech.shape[0], dim=0)
+                if self.use_avg_pitch:
+                    # to be implemented
+                    raise NotImplementedError
+                else:
+                    noisy_pitch = None
         
         # FORWARD 模型
-        # if self.use_ref_noise and self.use_source_noise:
-        #     diff_out, (ref_emb, noisy_ref_emb), (cond_emb, noisy_cond_emb) = self.model(
-        #         x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
-        #         x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
-        #         noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
-        #     )
-        # elif self.use_ref_noise:
-        #     diff_out, (ref_emb, noisy_ref_emb), (cond_emb, _) = self.model(
-        #         x=mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
-        #         x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
-        #     )
-        # else:
-        diff_out, (ref_emb, _), (cond_emb, _) = self.model(
-            x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
-            x_mask=mask, x_ref_mask=ref_mask
-        )
-        if self.use_normal_as_input:
-            diff_out_from_normal, (ref_emb, _), (cond_emb, _) = self.model(
+        if self.use_ref_noise and self.use_source_noise:
+            diff_out, (ref_emb, noisy_ref_emb), (cond_emb, noisy_cond_emb) = self.model(
+                x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
+                noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
+            )
+            if self.use_normal_as_input:
+                diff_out_from_normal, (n_ref_emb, n_noisy_ref_emb), (n_cond_emb, n_noisy_cond_emb) = self.model(
                 x=tar_mel, content_feature=normal_content_feature, pitch=pitch, x_ref=ref_mel,
+                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
+                noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
+                )
+        elif self.use_ref_noise:
+            diff_out, (ref_emb, noisy_ref_emb), (cond_emb, _) = self.model(
+                x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
+                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
+            )
+            if self.use_normal_as_input:
+                diff_out_from_normal, (n_ref_emb, n_noisy_ref_emb), (n_cond_emb, _) = self.model(
+                x=tar_mel, content_feature=normal_content_feature, pitch=pitch, x_ref=ref_mel,
+                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
+                )
+        else:
+            diff_out, (ref_emb, _), (cond_emb, _) = self.model(
+                x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
                 x_mask=mask, x_ref_mask=ref_mask
             )
+            if self.use_normal_as_input:
+                diff_out_from_normal, (n_ref_emb, _), (n_cond_emb, _) = self.model(
+                    x=tar_mel, content_feature=normal_content_feature, pitch=pitch, x_ref=ref_mel,
+                    x_mask=mask, x_ref_mask=ref_mask
+                )
 
-        # if self.use_ref_noise:
-        #     # B x N_query x D 
-        #     ref_emb = torch.mean(ref_emb, dim=1) # B x D
-        #     noisy_ref_emb = torch.mean(noisy_ref_emb, dim=1) # B x D
-        #     all_ref_emb = torch.cat([ref_emb, noisy_ref_emb], dim=0) # 2B x D
-        #     all_speaker_ids = torch.cat([batch["speaker_id"], batch["speaker_id"]], dim=0) # 2B
-        #     cs_loss = self.contrastive_speaker_loss(all_ref_emb, all_speaker_ids) * 0.25
-        #     total_loss += cs_loss
-        #     train_losses["ref_loss"] = cs_loss
+        if self.use_ref_noise:
+            # B x N_query x D 
+            ref_emb = torch.mean(ref_emb, dim=1) # B x D
+            noisy_ref_emb = torch.mean(noisy_ref_emb, dim=1) # B x D
+            all_ref_emb = torch.cat([ref_emb, noisy_ref_emb], dim=0) # 2B x D
+            all_speaker_ids = torch.cat([batch["speaker_id"], batch["speaker_id"]], dim=0) # 2B
+            cs_loss = self.contrastive_speaker_loss(all_ref_emb, all_speaker_ids) * 0.25
+            total_loss += cs_loss
+            train_losses["ref_loss"] = cs_loss
 
-        # if self.use_source_noise:
-        #     # B x T x D
-        #     diff_loss_cond = F.l1_loss(noisy_cond_emb, cond_emb, reduction="mean") * 2.0
-        #     total_loss += diff_loss_cond
-        #     train_losses["source_loss"] = diff_loss_cond
+        if self.use_source_noise:
+            # B x T x D
+            diff_loss_cond = F.l1_loss(noisy_cond_emb, cond_emb, reduction="mean") * 2.0
+            total_loss += diff_loss_cond
+            train_losses["source_loss"] = diff_loss_cond
+
+        if self.use_normal_as_input:
+            if self.use_ref_noise:
+                # B x N_query x D 
+                n_ref_emb = torch.mean(n_ref_emb, dim=1) # B x D
+                n_noisy_ref_emb = torch.mean(n_noisy_ref_emb, dim=1) # B x D
+                n_all_ref_emb = torch.cat([n_ref_emb, n_noisy_ref_emb], dim=0) # 2B x D
+                n_all_speaker_ids = torch.cat([batch["speaker_id"], batch["speaker_id"]], dim=0) # 2B
+                n_cs_loss = self.contrastive_speaker_loss(n_all_ref_emb, n_all_speaker_ids) * 0.25
+                total_loss += n_cs_loss
+                train_losses["normal_ref_loss"] = n_cs_loss
+
+            if self.use_source_noise:
+                # B x T x D
+                n_diff_loss_cond = F.l1_loss(noisy_cond_emb, cond_emb, reduction="mean") * 2.0
+                total_loss += n_diff_loss_cond
+                train_losses["normal_source_loss"] = n_diff_loss_cond
 
         # diff_loss_x0 = diff_loss(diff_out["x0_pred"], mel, mask=mask)
         # diff_loss_x0_1 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
@@ -467,7 +496,7 @@ class WVCTrainer(TTSTrainer):
         for item in train_losses:
             train_losses[item] = train_losses[item].item()
 
-        train_losses['learning_rate'] = f"{self.optimizer.param_groups[0]['lr']:.1e}"
+        train_losses['learning_rate'] = float(self.optimizer.param_groups[0]['lr'])
         train_losses["batch_size"] = batch["speaker_id"].shape[0]
         
         return (train_losses["total_loss"], train_losses, None)

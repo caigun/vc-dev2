@@ -40,7 +40,7 @@ if [ -z "$exp_config" ]; then
 fi
 echo "Exprimental Configuration File: $exp_config"
 
-exp_name="w2s_medium_cont"
+exp_name="w2s_medium_finetune_hubert"
 
 if [ -z "$gpu" ]; then
     gpu="0,1,2,3"
@@ -54,8 +54,8 @@ CUDA_VISIBLE_DEVICES=$gpu accelerate launch --main_process_port 28500 \
     --config $exp_config \
     --exp_name $exp_name \
     --log_level debug \
-    --resume \
-    --resume_type resume \
-    --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium/checkpoint/final_epoch-0010_step-0259440_loss-20313.045110
+    # --resume \
+    # --resume_type resume \
+    # --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium_noise/checkpoint/epoch-0019_step-0514440_loss-2.607965
     # --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0/checkpoint/final_epoch-0020_step-0039520_loss-2147.519705
     # --checkpoint_path /mntnfs/lee_data1/caijunwang/ckpt/vc_new_exp/new_mhubert/checkpoint/final_epoch-0007_step-0012509_loss-2331.561784

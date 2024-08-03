@@ -74,6 +74,7 @@ def calc_metric(
     wer_choose=1,
     ltr_path=None,
     language="english",
+    name="result"
 ):
     result = defaultdict()
 
@@ -121,13 +122,21 @@ def calc_metric(
                     with open(ltr_path, "r") as f:
                         for line in f:
                             paras = line.replace("\n", "").split("|")
-                            paras[1] = paras[1].replace(" ", "")
-                            paras[1] = paras[1].replace(".", "")
+                            # paras[1] = paras[1].replace(" ", "")
+                            paras[1] = paras[1].replace(".", " ")
                             paras[1] = paras[1].replace("'", "")
+                            paras[1] = paras[1].replace(";", "")
+                            paras[1] = paras[1].replace("(", "")
+                            paras[1] = paras[1].replace(")", "")
+                            paras[1] = paras[1].replace("--", " ")
                             paras[1] = paras[1].replace("-", "")
-                            paras[1] = paras[1].replace(",", "")
-                            paras[1] = paras[1].replace("!", "")
-                            paras[1] = paras[1].lower()
+                            paras[1] = paras[1].replace(",", " ")
+                            paras[1] = paras[1].replace("!", " ")
+                            paras[1] = paras[1].replace("\"", " ")
+                            paras[1] = paras[1].replace("?", " ")
+                            paras[1] = paras[1].replace(":", " ")
+                            paras[1] = paras[1].replace("  ", " ")
+                            paras[1] = paras[1].lower().strip()
                             tmpltrs[paras[0]] = paras[1]
                     ltrs = []
                     for file in files:
@@ -156,11 +165,16 @@ def calc_metric(
                             mode="gt_content",
                             language=language,
                         )
+                    print(score)
+                    if score > 0.5: # ignore abnormal data
+                        print(f"sample {i} occur with abnormal data, wer: {score}")
+                        score = np.nan
                 else:
                     score = METRIC_FUNC[metric](
                         audio_ref=audio_ref,
                         audio_deg=audio_deg,
                         fs=fs,
+                        language=language
                     )
                 if not np.isnan(score):
                     scores.append(score)
@@ -171,7 +185,7 @@ def calc_metric(
 
     data = json.dumps(result, indent=4)
 
-    with open(os.path.join(dump_dir, "result.json"), "w", newline="\n") as f:
+    with open(os.path.join(dump_dir, f"{name}.json"), "w", newline="\n") as f:
         f.write(data)
 
 
@@ -199,7 +213,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--fs",
-        type=str,
+        type=int,
         help="(Optional) Sampling rate",
     )
     parser.add_argument(
@@ -222,6 +236,12 @@ if __name__ == "__main__":
         default="english",
         help="(Optional)['english','chinese']",
     )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default="result",
+        help="title of the evaluation subjectives",
+    )
 
     args = parser.parse_args()
 
@@ -234,4 +254,5 @@ if __name__ == "__main__":
         args.wer_choose,
         args.ltr_path,
         args.language,
+        args.name,
     )

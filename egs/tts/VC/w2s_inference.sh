@@ -69,7 +69,7 @@ hubert_both_noise="xx"
 
 my_hubert_whisper="/mntnfs/lee_data1/caijunwang/ckpt/w2s_exp/w2s_with_normal/checkpoint/final_epoch-0010_step-0026350_loss-5318.630128/pytorch_model.bin"
 my_hubert_whisper_cont="/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0_mix/checkpoint/epoch-0075_step-0188220_loss-1.464374/pytorch_model.bin"
-mhubert_whisper_medium="/mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium/checkpoint/final_epoch-0010_step-0259440_loss-20313.045110/pytorch_model.bin"
+mhubert_whisper_medium="/mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium_noise/checkpoint/epoch-0017_step-0464440_loss-2.678372/pytorch_model.bin"
 checkpoint_path=$mhubert_whisper_medium
 
 # gpu的编号：一般用6/7,换卡

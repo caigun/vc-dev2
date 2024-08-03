@@ -75,6 +75,7 @@ def main():
     a = parser.parse_args()
 
     config_file = os.path.join(os.path.split(a.checkpoint_file)[0], 'config.json')
+    print(config_file)
     with open(config_file) as f:
         data = f.read()
 
