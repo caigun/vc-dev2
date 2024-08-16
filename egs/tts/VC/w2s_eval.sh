@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH -J test
-#SBATCH -p p-A800
+#SBATCH -J wVCeval
+#SBATCH -p p-A100
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 6
@@ -55,11 +55,11 @@ checkpoint_path=$mhubert_whisper_medium
 cuda_id=0
 
 #prompt就是reference， target就是ground truth
-output_dir="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/out/long_1000"
+output_dir="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/out/long_1000_1"
 # vocoder_path="/mntnfs/lee_data1/vcdata/g_00490000"
 vocoder_path="/mntnfs/lee_data1/caijunwang/resources/g_00205000" #hubert from Wesper
 wavlm_path="/mntnfs/lee_data1/vcdata/wavlm-base-plus-sv"
-dataset_path="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/test-clean"
+dataset_path="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/test-clean-whisper"
 
 
 echo "CUDA ID: $cuda_id"
@@ -78,7 +78,9 @@ python "${work_dir}"/models/tts/vc/whisper2speech/w2s_evaluation.py \
     --vocoder_path $vocoder_path \
     --dataset_path $dataset_path \
     --input_type normal\
-    --wavlm_path $wavlm_path
+    --wavlm_path $wavlm_path\
+    --length long\
+    --normal_dataset false
 
 echo "python convert.py --input ${output_dir}/source/wav --output ${output_dir}/wesper_recon/wav --hubert /mntnfs/lee_data1/caijunwang/resources/model-layer12-450000.pt --fastspeech2 /mntnfs/lee_data1/caijunwang/resources/googletts_neutral_best.tar --hifigan $vocoder_path"
 echo "sh egs/metrics/run.sh --reference_folder ${output_dir}/target/wav --generated_folder ${output_dir}/wesper_recon/wav --dump_folder /mntnfs/lee_data1/caijunwang/evaluation_results --metrics "wer" --fs 16000 --wer_choose 2 --ltr_path ${output_dir}/transcript.txt --language english --name wesper"

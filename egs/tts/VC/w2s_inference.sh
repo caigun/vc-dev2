@@ -69,11 +69,14 @@ hubert_both_noise="xx"
 
 my_hubert_whisper="/mntnfs/lee_data1/caijunwang/ckpt/w2s_exp/w2s_with_normal/checkpoint/final_epoch-0010_step-0026350_loss-5318.630128/pytorch_model.bin"
 my_hubert_whisper_cont="/mntnfs/lee_data1/caijunwang/ckpt/vc_whisper_exp/my_hubert_whisper_nof0_mix/checkpoint/epoch-0075_step-0188220_loss-1.464374/pytorch_model.bin"
-mhubert_whisper_medium="/mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium_noise/checkpoint/epoch-0017_step-0464440_loss-2.678372/pytorch_model.bin"
+mhubert_whisper_medium="/mntnfs/lee_data1/caijunwang/ckpt/w2s_with_normal_medium/w2s_medium_noise/checkpoint/final_epoch-0020_step-0540384_loss-71958.440633/pytorch_model.bin"
 checkpoint_path=$mhubert_whisper_medium
 
 # gpu的编号：一般用6/7,换卡
 cuda_id=0
+
+# source使用混合模式：一会normal一会whisper
+mix_utterance="true"
 
 #prompt就是reference， target就是ground truth
 zero_shot_json_file_path="/mntnfs/lee_data1/vcdata/VCTK_whisper/zero_shot_json.json" #测试用例的json文件
@@ -100,7 +103,8 @@ python "${work_dir}"/models/tts/vc/whisper2speech/w2s_inference.py \
     --output_dir $output_dir \
     --cuda_id ${cuda_id} \
     --vocoder_path $vocoder_path \
-    --wavlm_path $wavlm_path
+    --wavlm_path $wavlm_path \
+    --mix_utterance $mix_utterance
 
 # # 测试的reference是脏的
 # python "${work_dir}"/models/tts/vc/vc_inference.py \

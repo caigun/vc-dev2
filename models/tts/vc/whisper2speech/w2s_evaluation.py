@@ -13,9 +13,51 @@ from models.tts.vc.vc_utils import mel_spectrogram, extract_world_f0, get_pitch_
 from models.tts.vc.whisper2speech.w2s_dataset import get_normal_and_whisper
 from models.tts.vc.whisper2speech.hubert.w2u import whisper2vector
 from evaluation.metrics.similarity.speaker_similarity import extract_speaker_similarity
+import random
 
-def w2v_process(normal_path, ref_path, args, cfg, model, w2v, id, transcript_path):
-    tgt_wav, wav = get_normal_and_whisper(normal_path, temp_path="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/temp")
+def mix_audios(audio, tgt_audio, min_segment_length=32000, max_segment_length=64000):
+    """
+    Mix two audio signals by interleaving segments of varying lengths.
+    
+    audio: torch.Tensor, shape (1, N)
+    tgt_audio: torch.Tensor, shape (1, N)
+    min_segment_length: Minimum length of each segment in samples.
+    max_segment_length: Maximum length of each segment in samples.
+    """
+    
+    audio = audio.squeeze(0)
+    tgt_audio = tgt_audio.squeeze(0)
+    
+    total_length = audio.shape[0]
+    
+    mixed_audio = torch.zeros(total_length, device=audio.device)
+    
+    current_position = 0
+
+    choice = True
+    
+    while current_position < total_length:
+        segment_length = random.randint(min_segment_length, max_segment_length)
+        segment_length = min(segment_length, total_length - current_position)
+        if choice:
+            segment = audio[current_position:current_position + segment_length]
+        else:
+            segment = tgt_audio[current_position:current_position + segment_length]
+        
+        choice = choice == False
+        
+        mixed_audio[current_position:current_position + segment_length] = segment
+        current_position += segment_length
+    
+    return mixed_audio.unsqueeze(0)
+
+def w2v_process(normal_path, ref_path, args, cfg, model, w2v, id, transcript_path, whisper_path=None):
+    if whisper_path==None:
+        assert 0
+        tgt_wav, wav = get_normal_and_whisper(normal_path, temp_path="/mntcephfs/data/wuzhizheng/LibriTTS_whisper_eval/temp")
+    else:
+        tgt_wav, _ = librosa.load(normal_path, sr=16000)
+        wav, _ = librosa.load(whisper_path, sr=16000)
     ref_wav, _ = librosa.load(ref_path, sr=16000)
 
     wav = np.pad(wav, (0, 1600 - len(wav) % 1600))
@@ -141,6 +183,24 @@ def main():
         type=str,
         help="path to wavlm vocoder checkpoint."
     )
+    parser.add_argument(
+        "--length",
+        type=str,
+        default="long",
+        help="length choice of the audio (long/short)"
+    )
+    parser.add_argument(
+        "--normal_dataset",
+        type=str,
+        default="true",
+        help="whether use autoconvert the normal speech to whisper as input"
+    )
+    parser.add_argument(
+        "--mix_utterance", 
+        type=str, 
+        default='false', 
+        help="whether use whisper mix with normal utterance as source"
+    )
     parser.add_argument("--local_rank", default=-1, type=int)
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -213,33 +273,51 @@ def main():
         # Identify the book directory level based on folder depth
         parts = root.count(os.sep)
         if parts == args.dataset_path.count(os.sep) + 2:  # This identifies the book level in root/speaker/book structure
-            wav_files = sorted([f for f in files if f.endswith('.wav')])
+            if args.normal_dataset=='true':
+                wav_files = sorted([f for f in files if f.endswith('.wav')])
+            elif args.normal_dataset=='false':
+                wav_files = sorted([f for f in files if f.endswith('_whisper.wav')])
+            # wav_files = sorted([f for f in files if f.endswith('.wav')])
             if len(wav_files) > 1:  # Ensure there is more than one file to use the first as a reference
                 total_files += len(wav_files) - 1
 
     test_quantity = min(np.inf, total_files)
-    processed_files = tqdm(total=test_quantity)
+    processed_files = tqdm(total=total_files)
     file_id = 1  # Initialize file identifier
-    strike = 10
+    strike = 3
 
     for root, dirs, files in os.walk(args.dataset_path):
         parts = root.count(os.sep)
         if parts == args.dataset_path.count(os.sep) + 2:  # This identifies the book level
-            wav_files = sorted([f for f in files if f.endswith('.wav')])
+            if args.normal_dataset=='true':
+                wav_files = sorted([f for f in files if f.endswith('.wav')])
+            elif args.normal_dataset=='false':
+                wav_files = sorted([f for f in files if f.endswith('_whisper.wav')])
             if len(wav_files) > 1:
-                reference_audio = os.path.join(root, wav_files[0])
+                reference_audio = os.path.join(root, wav_files[0]).replace("_whisper.wav", ".wav")
                 nfile = 0
                 for audio_file in wav_files[1:]:
                     audio_path = os.path.join(root, audio_file)
                     audio, sr =  librosa.load(audio_path)
                     audio_length = len(audio)/sr
                     processed_files.update(1)
-                    if audio_length < 8:
-                        continue
-                    # if audio_length < 3 or audio_length >= 8:
-                    #     continue
-                    transcript_path = audio_path.replace(".wav", ".original.txt")
-                    w2v_process(normal_path=audio_path, ref_path=reference_audio, args=args, cfg=cfg, model=model, w2v=w2v, id=str(file_id), transcript_path=transcript_path)
+                    if args.length == "long":
+                        if audio_length < 8:
+                            continue
+                    elif args.length == "short":
+                        if audio_length < 3 or audio_length >= 8:
+                            continue
+                    else:
+                        raise NotImplementedError
+                    if args.normal_dataset=='true':
+                        transcript_path = audio_path.replace(".wav", ".original.txt")
+                        w2v_process(normal_path=audio_path, ref_path=reference_audio, args=args, cfg=cfg, model=model, w2v=w2v, id=str(file_id), transcript_path=transcript_path)
+                    elif args.normal_dataset=='false':
+                        transcript_path = audio_path.replace("_whisper.wav", ".original.txt").replace("-whisper", "")
+                        normal_path = audio_path.replace("_whisper.wav", ".wav")
+                        w2v_process(normal_path=normal_path, whisper_path=audio_path, ref_path=reference_audio, args=args, cfg=cfg, model=model, w2v=w2v, id=str(file_id), transcript_path=transcript_path)
+                    else:
+                        assert NotImplementedError
                     file_id += 1
                     nfile += 1
 

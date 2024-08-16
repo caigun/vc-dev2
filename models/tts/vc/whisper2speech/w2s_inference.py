@@ -15,24 +15,59 @@ from models.tts.vc.whisper_feature import WhisperNormal
 from models.tts.vc.hubert_kmeans import HubertWithKmeans
 from models.tts.vc.vc_utils import mel_spectrogram, extract_world_f0, get_pitch_shifted_speech
 from models.tts.vc.whisper2speech.hubert.w2u import whisper2vector
+import random
 
-utteranceid2text = {
-    '001': "Please call Stella.",
-    '002': "Ask her to bring these things with her from the store.",
-    '003': "Six spoons of fresh snow peas, five thick slabs of blue cheese, and maybe a snack for her brother Bob.",
-    '004': "We also need a small plastic snake and a big toy frog for the kids.",
-    '005': "She can scoop these things into three red bags, and we will go meet her Wednesday at the train station.",
-    '006': "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow.",
-}
+# utteranceid2text = {
+#     '001': "Please call Stella.",
+#     '002': "Ask her to bring these things with her from the store.",
+#     '003': "Six spoons of fresh snow peas, five thick slabs of blue cheese, and maybe a snack for her brother Bob.",
+#     '004': "We also need a small plastic snake and a big toy frog for the kids.",
+#     '005': "She can scoop these things into three red bags, and we will go meet her Wednesday at the train station.",
+#     '006': "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow.",
+# }
 
-def build_trainer(args, cfg):
-    supported_trainer = {
-        "VC": VCTrainer,
-    }
-    trainer_class = supported_trainer[cfg.model_type]
-    trainer = trainer_class(args, cfg)
-    return trainer
+# def build_trainer(args, cfg):
+#     supported_trainer = {
+#         "VC": VCTrainer,
+#     }
+#     trainer_class = supported_trainer[cfg.model_type]
+#     trainer = trainer_class(args, cfg)
+#     return trainer
+def mix_audios(audio, tgt_audio, min_segment_length=32000, max_segment_length=64000):
+    """
+    Mix two audio signals by interleaving segments of varying lengths.
+    
+    audio: torch.Tensor, shape (1, N)
+    tgt_audio: torch.Tensor, shape (1, N)
+    min_segment_length: Minimum length of each segment in samples.
+    max_segment_length: Maximum length of each segment in samples.
+    """
+    
+    audio = audio.squeeze(0)
+    tgt_audio = tgt_audio.squeeze(0)
+    
+    total_length = audio.shape[0]
+    
+    mixed_audio = torch.zeros(total_length, device=audio.device)
+    
+    current_position = 0
 
+    choice = True
+    
+    while current_position < total_length:
+        segment_length = random.randint(min_segment_length, max_segment_length)
+        segment_length = min(segment_length, total_length - current_position)
+        if choice:
+            segment = audio[current_position:current_position + segment_length]
+        else:
+            segment = tgt_audio[current_position:current_position + segment_length]
+        
+        choice = choice == False
+        
+        mixed_audio[current_position:current_position + segment_length] = segment
+        current_position += segment_length
+    
+    return mixed_audio.unsqueeze(0)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -65,6 +100,12 @@ def main():
         help="Cuda id for training."
     )
     parser.add_argument(
+        "--mix_utterance", 
+        type=str, 
+        default='false', 
+        help="Cuda id for training."
+    )
+    parser.add_argument(
         "--vocoder_path",
         type=str,
         help="path to BigVGAN vocoder checkpoint."
@@ -90,7 +131,7 @@ def main():
     args.local_rank = torch.device(f"cuda:{cuda_id}")
     print("local rank", args.local_rank)
 
-    content_extractor = "mhubert"
+    content_extractor = "whubert"
 
     if content_extractor=="whisper":
         args.content_extractor = "whisper"
@@ -206,6 +247,9 @@ def main():
         tgt_audio = torch.from_numpy(tgt_wav).to(args.local_rank)
         tgt_audio = tgt_audio[None, :]
 
+        if args.mix_utterance=="true":
+            audio = mix_audios(audio, tgt_audio)
+
         # prompt is the reference
         ref_wav_path = utt["prompt_speech"]
         ref_wav,_ = librosa.load(ref_wav_path, sr=16000)
@@ -254,7 +298,7 @@ def main():
                 pitch=pitch,
                 x_ref=ref_mel,
                 x_ref_mask=ref_mask,
-                inference_steps=200, 
+                inference_steps=1000, 
                 sigma=1.2,
                 # x=source_mel,
                 # mask=source_mask

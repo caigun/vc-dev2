@@ -8,6 +8,7 @@ import time
 import json5
 import torch
 import numpy as np
+import random
 from tqdm import tqdm
 from utils.util import ValueWindow
 from torch.utils.data import DataLoader
@@ -51,6 +52,7 @@ class WVCTrainer(TTSTrainer):
         self.use_source_noise = self.cfg.trans_exp.use_source_noise
         self.use_ref_noise = self.cfg.trans_exp.use_ref_noise
         self.use_speaker = self.cfg.trans_exp.use_speaker
+        self.use_whisper_mix_with_normal = self.cfg.trans_exp.use_whisper_mix_with_normal
 
         # configure whether to use average pitch to be pitch
         self.use_avg_pitch = self.cfg.trans_exp.use_avg_pitch
@@ -342,7 +344,25 @@ class WVCTrainer(TTSTrainer):
             else:
                 pitch = None
             
-            # 提取 pitch 和 content_feature
+            if self.use_whisper_mix_with_normal:
+                mix_speech = batch["mix_speech"]
+                # 两个愿望，一次满足
+                # randomly use empty input to ensure that empty input --> empty output
+                if random.random()<0.01:
+                    mix_speech = torch.zeros_like(mix_speech).to(device)
+                    tar_mix = torch.zeros_like(tar_speech).to(device)
+                else:
+                    tar_mix = tar_speech.clone()
+                    
+                if self.content_extractor == "mhubert":
+                    noisy_ref_mel = mel_spectrogram(mix_speech).transpose(1, 2)
+                    _, mix_content_feature = self.w2v(mix_speech)
+                    tar_mix_mel = mel_spectrogram(tar_mix).transpose(1,2)
+                elif self.content_extractor == "whubert":
+                    noisy_ref_mel = mel_spectrogram(mix_speech, hop_size=320).transpose(1, 2)
+                    mix_content_feature = self.w2v.forward(mix_speech)
+                    tar_mix_mel = mel_spectrogram(tar_mix, hop_size=320).transpose(1,2)
+
             if not self.use_source_noise:
                 if self.content_extractor == 'mhubert':
                     if self.use_normal_as_input:
@@ -394,6 +414,13 @@ class WVCTrainer(TTSTrainer):
                 x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
                 noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
                 )
+            if self.use_whisper_mix_with_normal:
+                diff_out_from_mix, (m_ref_emb, m_noisy_ref_emb), (m_cond_emb, m_noisy_cond_emb) = self.model(
+                x=tar_mix_mel, content_feature=mix_content_feature, pitch=pitch, x_ref=ref_mel,
+                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel,
+                noisy_content_feature=noisy_content_feature, noisy_pitch=noisy_pitch
+                )
+
         elif self.use_ref_noise:
             diff_out, (ref_emb, noisy_ref_emb), (cond_emb, _) = self.model(
                 x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
@@ -404,6 +431,11 @@ class WVCTrainer(TTSTrainer):
                 x=tar_mel, content_feature=normal_content_feature, pitch=pitch, x_ref=ref_mel,
                 x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
                 )
+            if self.use_whisper_mix_with_normal:
+                diff_out_from_mix, (m_ref_emb, m_noisy_ref_emb), (m_cond_emb, _) = self.model(
+                x=tar_mix_mel, content_feature=mix_content_feature, pitch=pitch, x_ref=ref_mel,
+                x_mask=mask, x_ref_mask=ref_mask, noisy_x_ref=noisy_ref_mel
+                )
         else:
             diff_out, (ref_emb, _), (cond_emb, _) = self.model(
                 x=tar_mel, content_feature=content_feature, pitch=pitch, x_ref=ref_mel,
@@ -412,6 +444,11 @@ class WVCTrainer(TTSTrainer):
             if self.use_normal_as_input:
                 diff_out_from_normal, (n_ref_emb, _), (n_cond_emb, _) = self.model(
                     x=tar_mel, content_feature=normal_content_feature, pitch=pitch, x_ref=ref_mel,
+                    x_mask=mask, x_ref_mask=ref_mask
+                )
+            if self.use_whisper_mix_with_normal:
+                diff_out_from_mix, (m_ref_emb, _), (m_cond_emb, _) = self.model(
+                    x=tar_mix_mel, content_feature=mix_content_feature, pitch=pitch, x_ref=ref_mel,
                     x_mask=mask, x_ref_mask=ref_mask
                 )
 
@@ -448,6 +485,22 @@ class WVCTrainer(TTSTrainer):
                 total_loss += n_diff_loss_cond
                 train_losses["normal_source_loss"] = n_diff_loss_cond
 
+        if self.use_whisper_mix_with_normal:
+            if self.use_ref_noise:
+                # B x N_query x D 
+                m_ref_emb = torch.mean(m_ref_emb, dim=1) # B x D
+                m_noisy_ref_emb = torch.mean(m_noisy_ref_emb, dim=1) # B x D
+                m_all_ref_emb = torch.cat([m_ref_emb, m_noisy_ref_emb], dim=0) # 2B x D
+                m_all_speaker_ids = torch.cat([batch["speaker_id"], batch["speaker_id"]], dim=0) # 2B
+                m_cs_loss = self.contrastive_speaker_loss(m_all_ref_emb, m_all_speaker_ids) * 0.25
+                total_loss += m_cs_loss
+                train_losses["mix_ref_loss"] = m_cs_loss
+
+            if self.use_source_noise:
+                # B x T x D
+                m_diff_loss_cond = F.l1_loss(noisy_cond_emb, cond_emb, reduction="mean") * 2.0
+                total_loss += m_diff_loss_cond
+                train_losses["mix_source_loss"] = m_diff_loss_cond
         # diff_loss_x0 = diff_loss(diff_out["x0_pred"], mel, mask=mask)
         # diff_loss_x0_1 = diff_loss(diff_out["x0_pred"], tar_mel, mask=mask)
         # total_loss += diff_loss_x0_1
@@ -482,7 +535,16 @@ class WVCTrainer(TTSTrainer):
 
             diff_loss_noise_whisper = diff_loss(diff_out_from_normal["noise_pred"], diff_out_from_normal["noise"], mask=mask)
             total_loss += diff_loss_noise_whisper
-            train_losses["diff_loss_noise"] = diff_loss_noise_whisper
+            train_losses["diff_loss_noise_normal"] = diff_loss_noise_whisper
+
+        if self.use_whisper_mix_with_normal:
+            diff_loss_x0_mix = diff_loss(diff_out_from_mix["x0_pred"], tar_mix_mel, mask=mask)
+            total_loss += diff_loss_x0_mix
+            train_losses["diff_loss_x0_mix"] = diff_loss_x0_mix
+
+            diff_loss_noise_whisper = diff_loss(diff_out_from_mix["noise_pred"], diff_out_from_mix["noise"], mask=mask)
+            total_loss += diff_loss_noise_whisper
+            train_losses["diff_loss_noise_mix"] = diff_loss_noise_whisper
         
         train_losses["total_loss"] = total_loss
 

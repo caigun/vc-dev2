@@ -16,16 +16,63 @@ import time
 import ctypes
 # from models.tts.vc.whisper2speech.s2w import s2w
 
+def mix_audios(audio, tgt_audio, min_segment_length=32000, max_segment_length=64000):
+    """
+    Mix two audio signals by interleaving segments of varying lengths.
+    
+    audio: torch.Tensor, shape (1, N)
+    tgt_audio: torch.Tensor, shape (1, N)
+    min_segment_length: Minimum length of each segment in samples.
+    max_segment_length: Maximum length of each segment in samples.
+    """
+    
+    audio = audio.squeeze(0)
+    tgt_audio = tgt_audio.squeeze(0)
+    
+    total_length = audio.shape[0]
+    # if total_length < max_segment_length:
+    #     return audio
+    
+    mixed_audio = torch.zeros(total_length, device=audio.device)
+    
+    current_position = 0
+
+    choice = True
+    
+    while current_position < total_length:
+        segment_length = random.randint(min_segment_length, max_segment_length)
+        segment_length = min(segment_length, total_length - current_position)
+        if choice:
+            segment = audio[current_position:current_position + segment_length]
+        else:
+            segment = tgt_audio[current_position:current_position + segment_length]
+        
+        choice = choice == False
+        
+        # print(audio.shape, tgt_audio.shape, segment.shape, current_position, current_position + segment_length, segment_length, mixed_audio.shape)
+
+        mixed_audio[current_position:current_position + segment_length] = segment
+        current_position += segment_length
+    
+    return mixed_audio
+
 NUM_WORKERS = 64
 lock = Lock()  # 创建一个全局锁
 SAMPLE_RATE = 16000
 lib=ctypes.CDLL("/mntnfs/lee_data1/caijunwang/vc-dev2/models/tts/vc/whisper2speech/toWhisper/libtoWhisper.so")
-def process_audio(normal_path,output_path):
+def process_audio(normal_path,output_path,random_parameter=False):
     input_path = normal_path
     output_file = output_path 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    # Create random parameters
+    if random_parameter:
+        l = random.random()*0.99
+        r = (random.random()-0.5)*0.3
+    else:
+        l = 0.6
+        r = 0
     # Create argv parameters
-    argv = [b"./toWhisper", b"-o", output_file.encode(), b"-l", b"0.6",input_path.encode()]
+    argv = [b"./toWhisper", b"-o", output_file.encode(), b"-l", str(l).encode(), b"-r", str(r).encode(),input_path.encode()]
     argc = len(argv)
     argv_array = (ctypes.POINTER(ctypes.c_char) * (argc + 1))()
     for i, arg in enumerate(argv):
@@ -38,10 +85,10 @@ def process_audio(normal_path,output_path):
         print(f"Failed to process {input_path}: {result}")
     else:
         return input_path
-def get_normal_and_whisper(normal_path, temp_path):
+def get_normal_and_whisper(normal_path, temp_path, random_param_in_toWhisper=False):
     filename = os.path.basename(normal_path)
     output_path = os.path.join(temp_path, filename)
-    process_audio(normal_path, output_path)
+    process_audio(normal_path, output_path, random_param_in_toWhisper)
     speech, _ = librosa.load(normal_path, sr=SAMPLE_RATE)
     wspeech, _ = librosa.load(output_path, sr=SAMPLE_RATE)
     os.remove(output_path)
@@ -81,6 +128,8 @@ class VCDataset(Dataset):
         self.toWhisper_path = args.toWhisper_path
         self.temp_file_path = args.temp_file_path
         self.content_extractor = args.content_extractor
+        self.random_param_in_toWhisper = args.random_param_in_toWhisper
+        self.use_whisper_mix_with_normal = args.use_whisper_mix_with_normal
 
         # 配置噪声和说话人使用
         self.use_source_noise = args.use_source_noise
@@ -312,7 +361,8 @@ class VCDataset(Dataset):
     def __getitem__(self, idx):
         file_path = self.filtered_files[idx]
         speech, wspeech = get_normal_and_whisper(file_path,
-                                                 self.temp_file_path)
+                                                 self.temp_file_path,
+                                                 self.random_param_in_toWhisper)
                                                 #  self.toWhisper_path)
                                                 #  "/mntnfs/lee_data1/caijunwang/ckpt/temp",
                                                 #  "/mntnfs/lee_data1/caijunwang/lib/toWhisper")
@@ -353,22 +403,27 @@ class VCDataset(Dataset):
         ref_mask = torch.ones(len(ref_speech) // hop_length)
         mask = torch.ones(len(new_speech) // hop_length)
 
+        if self.use_whisper_mix_with_normal:
+            mix_speech = mix_audios(new_speech, tar_speech)
+        else:
+            mix_speech = None
+
         if not (self.use_source_noise or self.use_ref_noise):
             # 不使用噪声
-            return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+            return {"speech": new_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech, "mix_speech": mix_speech}
         elif self.use_source_noise and self.use_ref_noise:
             # 使用噪声
             noisy_ref_speech = self.add_noise(ref_speech) # 添加噪声
             nosiy_speech = self.add_noise(new_speech) # 添加噪声
-            return {"speech": new_speech, "noisy_speech":nosiy_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+            return {"speech": new_speech, "noisy_speech":nosiy_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech, "mix_speech": mix_speech}
         elif self.use_source_noise and not self.use_ref_noise:
             # 只使用源噪声
             noisy_speech = self.add_noise(new_speech)
-            return {"speech": new_speech, "noisy_speech": noisy_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+            return {"speech": new_speech, "noisy_speech": noisy_speech, "ref_speech": ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech, "mix_speech": mix_speech}
         elif self.use_ref_noise and not self.use_source_noise:
             # 只使用参考噪声
             noisy_ref_speech = self.add_noise(ref_speech)
-            return {"speech": new_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech}
+            return {"speech": new_speech, "ref_speech": ref_speech, "noisy_ref_speech": noisy_ref_speech, "ref_mask": ref_mask, "mask": mask, "target": tar_speech, "mix_speech": mix_speech}
         
 class VCCollator(BaseCollator):
     def __init__(self, cfg):
@@ -377,6 +432,7 @@ class VCCollator(BaseCollator):
 
         self.use_source_noise = self.cfg.trans_exp.use_source_noise
         self.use_ref_noise = self.cfg.trans_exp.use_ref_noise
+        self.use_whisper_mix_with_normal = self.cfg.trans_exp.use_whisper_mix_with_normal
  
         print(f"use_source_noise: {self.use_source_noise}")
         print(f"use_ref_noise: {self.use_ref_noise}")
@@ -395,6 +451,11 @@ class VCCollator(BaseCollator):
         # Process 'speech' data
         speeches = [process_tensor(b['speech']) for b in batch]
         packed_batch_features['speech'] = pad_sequence(speeches, batch_first=True, padding_value=0)
+
+        if self.use_whisper_mix_with_normal:
+            # Process 'mix_speech' data
+            mix_speeches = [process_tensor(b['mix_speech']) for b in batch]
+            packed_batch_features['mix_speech'] = pad_sequence(mix_speeches, batch_first=True, padding_value=0)
 
         # Process 'ref_speech' data
         ref_speeches = [process_tensor(b['ref_speech']) for b in batch]
