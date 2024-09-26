@@ -1309,6 +1309,7 @@ class UniAmphionVC(nn.Module):
         x_ref_mask=None,
         inference_steps=1000,
         sigma=1.2,
+        x_mask=None
     ):
         reference_embedding, _ = self.reference_encoder(
             x_ref=x_ref, key_padding_mask=x_ref_mask
@@ -1339,7 +1340,7 @@ class UniAmphionVC(nn.Module):
         x0 = self.diffusion.reverse_diffusion(
             z=z,
             condition_embedding=condition_embedding,
-            x_mask=None,
+            x_mask=x_mask,
             reference_embedding=reference_embedding,
             n_timesteps=inference_steps,
         )
